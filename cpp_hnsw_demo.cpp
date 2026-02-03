@@ -291,25 +291,25 @@ class SimpleHNSW {
         // 1) Clear old connectivity completely (important: treat as "fresh insert")
         //    Unlink at all levels the deleted node had.
         //    (We must do this before overwriting node.level if we rely on it.)
-        // int inherited_level = nodes_[deleted_id].level;
-        // for (int lvl = inherited_level; lvl >= 0; --lvl) {
-        //     auto it_old = nodes_[deleted_id].neighbors.find(lvl);
-        //     if (it_old != nodes_[deleted_id].neighbors.end()) {
-        //         std::vector<int> old(it_old->second.begin(), it_old->second.end());
-        //         // std::cout << "unlinking " << deleted_id << " " << old << " " << lvl << "\n";
-        //         for (int v : old) {
-        //             // If the deleted node had no neighbors at this level, it could potentially create empty or missing links
-        //             unlink(deleted_id, v, lvl);
-        //             // if (nodes_[v].neighbors.count(lvl) > 1 || lvl == 0) {
-        //             //     unlink(deleted_id, v, lvl);
-        //             // }
-        //         }
-        //     }
-        //     // nodes_[deleted_id].neighbors.erase(lvl);
-        // }
+        int inherited_level = nodes_[deleted_id].level;
+        for (int lvl = inherited_level; lvl >= 0; --lvl) {
+            auto it_old = nodes_[deleted_id].neighbors.find(lvl);
+            if (it_old != nodes_[deleted_id].neighbors.end()) {
+                std::vector<int> old(it_old->second.begin(), it_old->second.end());
+                // std::cout << "unlinking " << deleted_id << " " << old << " " << lvl << "\n";
+                for (int v : old) {
+                    // If the deleted node had no neighbors at this level, it could potentially create empty or missing links
+                    unlink(deleted_id, v, lvl);
+                    // if (nodes_[v].neighbors.count(lvl) > 1 || lvl == 0) {
+                    //     unlink(deleted_id, v, lvl);
+                    // }
+                }
+            }
+            // nodes_[deleted_id].neighbors.erase(lvl);
+        }
         
         // std::cout << "\n Inherited Level " << inherited_level << "\n max layer" << max_level_ << "\n neighbors" << nodes_[deleted_id].neighbors;
-        int inherited_level = nodes_[deleted_id].level;
+        // int inherited_level = nodes_[deleted_id].level;
 
         // for (int lvl = inherited_level; lvl >= 0; --lvl) {
         //     auto it = nodes_[deleted_id].neighbors.find(lvl);
@@ -783,7 +783,7 @@ class SimpleHNSW {
             for (int v : it_del->second) {
                 if (v == node_id) continue;
                 if (nodes_[v].deleted) continue;
-                if (nodes_[v].level < level) continue;
+                if (nodes_[v].level != level) continue;
                 N1.push_back(v);
             }
             if (N1.empty()) {
@@ -800,8 +800,8 @@ class SimpleHNSW {
                 if (it_v == nodes_[v].neighbors.end()) continue;
                 if (it_v->second.count(node_id)) {
                     N2.push_back(v);
-                    // it_v->second.erase(node_id);
-                    // if (it_v->second.empty()) nodes_[v].neighbors.erase(level);
+                    it_v->second.erase(node_id);
+                    if (it_v->second.empty()) nodes_[v].neighbors.erase(level);
                 }
             }
             if (N2.empty()) {
@@ -842,7 +842,7 @@ class SimpleHNSW {
 
             for (int u : N2) {
                 if (nodes_[u].deleted) continue;
-                if (nodes_[u].level < level) continue;
+                if (nodes_[u].level != level) continue;
 
                 // C = neighbors(u, level) ∪ N1  (minus {deleted,node_id,u})
                 std::unordered_set<int> Cset;
@@ -855,7 +855,7 @@ class SimpleHNSW {
                     for (int x : it_u->second) {
                         if (x == node_id || x == u) continue;
                         if (nodes_[x].deleted) continue;
-                        if (nodes_[x].level < level) continue;
+                        if (nodes_[x].level != level) continue;
                         Cset.insert(x);
                     }
                 }
@@ -864,7 +864,7 @@ class SimpleHNSW {
                 for (int x : N1) {
                     if (x == node_id || x == u) continue;
                     if (nodes_[x].deleted) continue;
-                    if (nodes_[x].level < level) continue;
+                    if (nodes_[x].level != level) continue;
                     Cset.insert(x);
                 }
 
@@ -909,40 +909,40 @@ class SimpleHNSW {
 
                 for (int v : u_set) {
                     if (nodes_[v].deleted) continue;
-                    if (nodes_[v].level < level) continue;
+                    if (nodes_[v].level != level) continue;
 
                     auto &v_set = nodes_[v].neighbors[level];
 
                     if (v_set.count(u)) continue;
                     
-                    // v_set.insert(u);
-                    // std::vector<int> candidates_v;
-                    // for (int x : v_set) candidates_v.push_back(x);
-                    // std::vector<int> pruned_v = prune_alpha_rng(v, candidates_v, alpha);
-                    // nodes_[v].neighbors[level].clear();
-                    // nodes_[v].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
+                    v_set.insert(u);
+                    std::vector<int> candidates_v;
+                    for (int x : v_set) candidates_v.push_back(x);
+                    std::vector<int> pruned_v = prune_alpha_rng(v, candidates_v, alpha);
+                    nodes_[v].neighbors[level].clear();
+                    nodes_[v].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
 
-                    if ((int)v_set.size() < m_) {
-                        v_set.insert(u); 
-                    } else {
-                        // Replace worst neighbor of v if u is better
-                        int worst = -1;
-                        float worst_dist = -1.0f;
+                    // if ((int)v_set.size() < m_) {
+                    //     v_set.insert(u); 
+                    // } else {
+                    //     // Replace worst neighbor of v if u is better
+                    //     int worst = -1;
+                    //     float worst_dist = -1.0f;
 
-                        for (int x : v_set) {
-                            float d = distance(nodes_[v].vector, nodes_[x].vector);
-                            stats.distance_evals++;
-                            if (d > worst_dist) { worst_dist = d; worst = x; }
-                        }
+                    //     for (int x : v_set) {
+                    //         float d = distance(nodes_[v].vector, nodes_[x].vector);
+                    //         stats.distance_evals++;
+                    //         if (d > worst_dist) { worst_dist = d; worst = x; }
+                    //     }
 
-                        float d_new = distance(nodes_[v].vector, nodes_[u].vector);
-                        stats.distance_evals++;
+                    //     float d_new = distance(nodes_[v].vector, nodes_[u].vector);
+                    //     stats.distance_evals++;
 
-                        if (worst != -1 && d_new < worst_dist) {
-                            v_set.erase(worst);
-                            v_set.insert(u);
-                        }
-                    }
+                    //     if (worst != -1 && d_new < worst_dist) {
+                    //         v_set.erase(worst);
+                    //         v_set.insert(u);
+                    //     }
+                    // }
                 }
             }
 
@@ -4043,7 +4043,7 @@ void test_sequential_deletion_degradation() {
         //     mnru_recall_avg,
         //     mnru_update_ms
         // });
-
+ 
         // table.push_back({
         //     target_del,
         //     tomb_del_ms,
