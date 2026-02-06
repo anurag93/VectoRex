@@ -624,11 +624,12 @@ class SimpleHNSW {
         int distance_evals{0};
     };
 
-    RewireStats delete_with_local_rewiring(const std::string &label) {
+    RewireStats delete_with_local_rewiring(const std::string &label, const std::vector<float>& new_vec) {
         if (!label_to_id_.count(label)) {
             throw std::runtime_error("Label not found: " + label);
         }
         int node_id = label_to_id_[label];
+        float alpha = 1.0f;
         if (nodes_[node_id].deleted) {
             throw std::runtime_error("Label already deleted: " + label);
         }
@@ -724,6 +725,7 @@ class SimpleHNSW {
         if (entry_point_.value() == node_id) {
             reassign_entry_point();
         }
+        mnru_update_deleted_id(node_id, label, new_vec, alpha);
         return stats;
     }
 
@@ -2670,218 +2672,218 @@ int main() {
 }
 
 // Test case for deleting top-layer nodes
-void test_top_layer_deletion() {
-    std::cout << "\n" << std::string(70, '=')
-              << "\nTEST: Deleting Top-Layer Nodes"
-              << "\n" << std::string(70, '=') << "\n";
+// void test_top_layer_deletion() {
+//     std::cout << "\n" << std::string(70, '=')
+//               << "\nTEST: Deleting Top-Layer Nodes"
+//               << "\n" << std::string(70, '=') << "\n";
 
-    const int N = 1000;
-    const int D = 64;
-    const int K = 5;
-    const int EF = 20;
+//     const int N = 1000;
+//     const int D = 64;
+//     const int K = 5;
+//     const int EF = 20;
 
-    // Generate random vectors
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    std::vector<std::pair<std::string, std::vector<float>>> data_points;
-    for (int i = 0; i < N; ++i) {
-        std::vector<float> vec(D);
-        for (int j = 0; j < D; ++j) {
-            vec[j] = dist(rng);
-        }
-        data_points.emplace_back("vec_" + std::to_string(i), vec);
-    }
+//     // Generate random vectors
+//     std::mt19937 rng(42);
+//     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+//     std::vector<std::pair<std::string, std::vector<float>>> data_points;
+//     for (int i = 0; i < N; ++i) {
+//         std::vector<float> vec(D);
+//         for (int j = 0; j < D; ++j) {
+//             vec[j] = dist(rng);
+//         }
+//         data_points.emplace_back("vec_" + std::to_string(i), vec);
+//     }
 
-    // Generate query
-    std::vector<float> query(D);
-    for (int j = 0; j < D; ++j) {
-        query[j] = dist(rng);
-    }
+//     // Generate query
+//     std::vector<float> query(D);
+//     for (int j = 0; j < D; ++j) {
+//         query[j] = dist(rng);
+//     }
 
-    // Create two identical indexes
-    SimpleHNSW hnsw_tombstone(D, 8, 0.5f, 16, 42);
-    SimpleHNSW hnsw_rewiring(D, 8, 0.5f, 16, 42);
+//     // Create two identical indexes
+//     SimpleHNSW hnsw_tombstone(D, 8, 0.5f, 16, 42);
+//     SimpleHNSW hnsw_rewiring(D, 8, 0.5f, 16, 42);
 
-    std::cout << "\n[Inserting " << N << " vectors...]\n";
-    for (const auto &[label, vec] : data_points) {
-        hnsw_tombstone.insert(label, vec);
-        hnsw_rewiring.insert(label, vec);
-    }
+//     std::cout << "\n[Inserting " << N << " vectors...]\n";
+//     for (const auto &[label, vec] : data_points) {
+//         hnsw_tombstone.insert(label, vec);
+//         hnsw_rewiring.insert(label, vec);
+//     }
 
-    // Get baseline search
-    auto baseline = hnsw_tombstone.search(query, K, EF, false);
-    std::cout << "\n[Baseline search - Top " << K << " results:]\n";
-    for (size_t i = 0; i < baseline.size() && i < K; ++i) {
-        std::cout << "  " << (i + 1) << ". " << baseline[i].label
-                  << " distance=" << baseline[i].distance << "\n";
-    }
+//     // Get baseline search
+//     auto baseline = hnsw_tombstone.search(query, K, EF, false);
+//     std::cout << "\n[Baseline search - Top " << K << " results:]\n";
+//     for (size_t i = 0; i < baseline.size() && i < K; ++i) {
+//         std::cout << "  " << (i + 1) << ". " << baseline[i].label
+//                   << " distance=" << baseline[i].distance << "\n";
+//     }
 
-    // Simple heuristic: pick nodes that are likely at high levels
-    // In practice, you'd check the actual node.level, but for this test we'll use
-    // a simpler approach: delete nodes that are far from the query (likely at higher levels)
-    std::vector<std::pair<float, std::string>> distances;
-    for (const auto &[label, vec] : data_points) {
-        float dist = 0.0f;
-        for (int i = 0; i < D; ++i) {
-            float diff = query[i] - vec[i];
-            dist += diff * diff;
-        }
-        distances.emplace_back(std::sqrt(dist), label);
-    }
+//     // Simple heuristic: pick nodes that are likely at high levels
+//     // In practice, you'd check the actual node.level, but for this test we'll use
+//     // a simpler approach: delete nodes that are far from the query (likely at higher levels)
+//     std::vector<std::pair<float, std::string>> distances;
+//     for (const auto &[label, vec] : data_points) {
+//         float dist = 0.0f;
+//         for (int i = 0; i < D; ++i) {
+//             float diff = query[i] - vec[i];
+//             dist += diff * diff;
+//         }
+//         distances.emplace_back(std::sqrt(dist), label);
+//     }
     
-    // Sort by distance (farthest first - these are more likely to be at higher levels)
-    std::sort(distances.begin(), distances.end(),
-              [](const auto &a, const auto &b) { return a.first > b.first; });
+//     // Sort by distance (farthest first - these are more likely to be at higher levels)
+//     std::sort(distances.begin(), distances.end(),
+//               [](const auto &a, const auto &b) { return a.first > b.first; });
     
-    // Pick top 3 farthest nodes as candidates for top-layer deletion
-    std::vector<std::string> nodes_to_delete;
-    for (size_t i = 0; i < std::min(3UL, distances.size()); ++i) {
-        nodes_to_delete.push_back(distances[i].second);
-    }
+//     // Pick top 3 farthest nodes as candidates for top-layer deletion
+//     std::vector<std::string> nodes_to_delete;
+//     for (size_t i = 0; i < std::min(3UL, distances.size()); ++i) {
+//         nodes_to_delete.push_back(distances[i].second);
+//     }
 
-    std::cout << "\n[Testing deletion of " << nodes_to_delete.size()
-              << " candidate top-layer nodes]\n";
+//     std::cout << "\n[Testing deletion of " << nodes_to_delete.size()
+//               << " candidate top-layer nodes]\n";
     
-    // Track cumulative times
-    double total_tombstone_delete = 0.0;
-    double total_rewiring_delete = 0.0;
-    double total_tombstone_search = 0.0;
-    double total_rewiring_search = 0.0;
+//     // Track cumulative times
+//     double total_tombstone_delete = 0.0;
+//     double total_rewiring_delete = 0.0;
+//     double total_tombstone_search = 0.0;
+//     double total_rewiring_search = 0.0;
     
-    for (const auto &node_label : nodes_to_delete) {
-        std::cout << "\n--- Deleting: " << node_label << " ---\n";
+//     for (const auto &node_label : nodes_to_delete) {
+//         std::cout << "\n--- Deleting: " << node_label << " ---\n";
 
-        // Delete using tombstone
-        auto start = std::chrono::steady_clock::now();
-        hnsw_tombstone.delete_node(node_label);
-        auto end = std::chrono::steady_clock::now();
-        double tombstone_delete_time = std::chrono::duration<double, std::milli>(end - start).count();
-        total_tombstone_delete += tombstone_delete_time;
+//         // Delete using tombstone
+//         auto start = std::chrono::steady_clock::now();
+//         hnsw_tombstone.delete_node(node_label);
+//         auto end = std::chrono::steady_clock::now();
+//         double tombstone_delete_time = std::chrono::duration<double, std::milli>(end - start).count();
+//         total_tombstone_delete += tombstone_delete_time;
 
-        // Delete using rewiring
-        start = std::chrono::steady_clock::now();
-        auto stats = hnsw_rewiring.delete_with_local_rewiring(node_label);
-        end = std::chrono::steady_clock::now();
-        double rewiring_delete_time = std::chrono::duration<double, std::milli>(end - start).count();
-        total_rewiring_delete += rewiring_delete_time;
+//         // Delete using rewiring
+//         start = std::chrono::steady_clock::now();
+//         // auto stats = hnsw_rewiring.delete_with_local_rewiring(node_label, );
+//         end = std::chrono::steady_clock::now();
+//         double rewiring_delete_time = std::chrono::duration<double, std::milli>(end - start).count();
+//         total_rewiring_delete += rewiring_delete_time;
 
-        // Search after deletion
-        start = std::chrono::steady_clock::now();
-        auto tombstone_results = hnsw_tombstone.search(query, K, EF, false);
-        end = std::chrono::steady_clock::now();
-        double tombstone_search_time = std::chrono::duration<double, std::milli>(end - start).count();
-        total_tombstone_search += tombstone_search_time;
+//         // Search after deletion
+//         start = std::chrono::steady_clock::now();
+//         auto tombstone_results = hnsw_tombstone.search(query, K, EF, false);
+//         end = std::chrono::steady_clock::now();
+//         double tombstone_search_time = std::chrono::duration<double, std::milli>(end - start).count();
+//         total_tombstone_search += tombstone_search_time;
         
-        start = std::chrono::steady_clock::now();
-        auto rewiring_results = hnsw_rewiring.search(query, K, EF, false);
-        end = std::chrono::steady_clock::now();
-        double rewiring_search_time = std::chrono::duration<double, std::milli>(end - start).count();
-        total_rewiring_search += rewiring_search_time;
+//         start = std::chrono::steady_clock::now();
+//         auto rewiring_results = hnsw_rewiring.search(query, K, EF, false);
+//         end = std::chrono::steady_clock::now();
+//         double rewiring_search_time = std::chrono::duration<double, std::milli>(end - start).count();
+//         total_rewiring_search += rewiring_search_time;
 
-        // Verify deleted node is not in results
-        auto contains = [](const std::vector<SimpleHNSW::SearchResult> &results,
-                          const std::string &label) {
-            for (const auto &r : results) {
-                if (r.label == label) return true;
-            }
-            return false;
-        };
+//         // Verify deleted node is not in results
+//         auto contains = [](const std::vector<SimpleHNSW::SearchResult> &results,
+//                           const std::string &label) {
+//             for (const auto &r : results) {
+//                 if (r.label == label) return true;
+//             }
+//             return false;
+//         };
 
-        bool deleted_in_tombstone = contains(tombstone_results, node_label);
-        bool deleted_in_rewiring = contains(rewiring_results, node_label);
+//         bool deleted_in_tombstone = contains(tombstone_results, node_label);
+//         bool deleted_in_rewiring = contains(rewiring_results, node_label);
 
-        std::cout << "  Deletion time - Tombstone: " << tombstone_delete_time << " ms, "
-                  << "Rewiring: " << rewiring_delete_time << " ms\n";
-        std::cout << "  Search time - Tombstone: " << tombstone_search_time << " ms, "
-                  << "Rewiring: " << rewiring_search_time << " ms\n";
-        std::cout << "  Deleted node in results - Tombstone: " << std::boolalpha
-                  << deleted_in_tombstone << ", Rewiring: " << deleted_in_rewiring << "\n";
-        std::cout << "  Rewired edges: " << stats.rewired_edges_count << "\n";
+//         std::cout << "  Deletion time - Tombstone: " << tombstone_delete_time << " ms, "
+//                   << "Rewiring: " << rewiring_delete_time << " ms\n";
+//         std::cout << "  Search time - Tombstone: " << tombstone_search_time << " ms, "
+//                   << "Rewiring: " << rewiring_search_time << " ms\n";
+//         std::cout << "  Deleted node in results - Tombstone: " << std::boolalpha
+//                   << deleted_in_tombstone << ", Rewiring: " << deleted_in_rewiring << "\n";
+//         std::cout << "  Rewired edges: " << stats.rewired_edges_count << "\n";
 
-        if (deleted_in_tombstone || deleted_in_rewiring) {
-            std::cout << "  ✗ WARNING: Deleted node still in results!\n";
-        } else {
-            std::cout << "  ✓ Deleted node correctly excluded\n";
-        }
+//         if (deleted_in_tombstone || deleted_in_rewiring) {
+//             std::cout << "  ✗ WARNING: Deleted node still in results!\n";
+//         } else {
+//             std::cout << "  ✓ Deleted node correctly excluded\n";
+//         }
 
-        // Check if results match
-        auto extract_labels = [](const std::vector<SimpleHNSW::SearchResult> &results) {
-            std::vector<std::string> labels;
-            for (const auto &r : results) {
-                labels.push_back(r.label);
-            }
-            return labels;
-        };
+//         // Check if results match
+//         auto extract_labels = [](const std::vector<SimpleHNSW::SearchResult> &results) {
+//             std::vector<std::string> labels;
+//             for (const auto &r : results) {
+//                 labels.push_back(r.label);
+//             }
+//             return labels;
+//         };
 
-        auto tombstone_labels = extract_labels(tombstone_results);
-        auto rewiring_labels = extract_labels(rewiring_results);
-        bool labels_match = (tombstone_labels == rewiring_labels);
+//         auto tombstone_labels = extract_labels(tombstone_results);
+//         auto rewiring_labels = extract_labels(rewiring_results);
+//         bool labels_match = (tombstone_labels == rewiring_labels);
 
-        if (labels_match) {
-            std::cout << "  ✓ Results match between methods\n";
-        } else {
-            std::cout << "  ✗ Results differ between methods\n";
-        }
-    }
+//         if (labels_match) {
+//             std::cout << "  ✓ Results match between methods\n";
+//         } else {
+//             std::cout << "  ✗ Results differ between methods\n";
+//         }
+//     }
 
-    // Final search comparison
-    std::cout << "\n[Final Search Comparison]\n";
-    auto final_tombstone = hnsw_tombstone.search(query, K, EF, false);
-    auto final_rewiring = hnsw_rewiring.search(query, K, EF, false);
+//     // Final search comparison
+//     std::cout << "\n[Final Search Comparison]\n";
+//     auto final_tombstone = hnsw_tombstone.search(query, K, EF, false);
+//     auto final_rewiring = hnsw_rewiring.search(query, K, EF, false);
 
-    std::cout << "Tombstone results:\n";
-    for (size_t i = 0; i < final_tombstone.size(); ++i) {
-        std::cout << "  " << (i + 1) << ". " << final_tombstone[i].label
-                  << " distance=" << final_tombstone[i].distance << "\n";
-    }
-    std::cout << "Rewiring results:\n";
-    for (size_t i = 0; i < final_rewiring.size(); ++i) {
-        std::cout << "  " << (i + 1) << ". " << final_rewiring[i].label
-                  << " distance=" << final_rewiring[i].distance << "\n";
-    }
+//     std::cout << "Tombstone results:\n";
+//     for (size_t i = 0; i < final_tombstone.size(); ++i) {
+//         std::cout << "  " << (i + 1) << ". " << final_tombstone[i].label
+//                   << " distance=" << final_tombstone[i].distance << "\n";
+//     }
+//     std::cout << "Rewiring results:\n";
+//     for (size_t i = 0; i < final_rewiring.size(); ++i) {
+//         std::cout << "  " << (i + 1) << ". " << final_rewiring[i].label
+//                   << " distance=" << final_rewiring[i].distance << "\n";
+//     }
 
-    // Performance comparison summary
-    std::cout << "\n" << std::string(70, '-')
-              << "\nPERFORMANCE COMPARISON (Top-Layer Deletion):\n"
-              << std::string(70, '-') << "\n";
+//     // Performance comparison summary
+//     std::cout << "\n" << std::string(70, '-')
+//               << "\nPERFORMANCE COMPARISON (Top-Layer Deletion):\n"
+//               << std::string(70, '-') << "\n";
     
-    auto compare_times = [](const std::string &label, double a, double b) {
-        std::cout << label << "\n";
-        std::cout << "  Tombstone: " << a << " ms\n";
-        std::cout << "  Rewiring:  " << b << " ms\n";
-        if (a < b) {
-            std::cout << "  → Tombstone is " << (b / a) << "x faster\n";
-        } else if (b < a) {
-            std::cout << "  → Rewiring is " << (a / b) << "x faster\n";
-        } else {
-            std::cout << "  → Both methods take the same time\n";
-        }
-    };
+//     auto compare_times = [](const std::string &label, double a, double b) {
+//         std::cout << label << "\n";
+//         std::cout << "  Tombstone: " << a << " ms\n";
+//         std::cout << "  Rewiring:  " << b << " ms\n";
+//         if (a < b) {
+//             std::cout << "  → Tombstone is " << (b / a) << "x faster\n";
+//         } else if (b < a) {
+//             std::cout << "  → Rewiring is " << (a / b) << "x faster\n";
+//         } else {
+//             std::cout << "  → Both methods take the same time\n";
+//         }
+//     };
 
-    compare_times("\nTotal Deletion Time (all " + std::to_string(nodes_to_delete.size()) + " nodes):",
-                  total_tombstone_delete, total_rewiring_delete);
-    compare_times("\nTotal Search Time (after all deletions):",
-                  total_tombstone_search, total_rewiring_search);
+//     compare_times("\nTotal Deletion Time (all " + std::to_string(nodes_to_delete.size()) + " nodes):",
+//                   total_tombstone_delete, total_rewiring_delete);
+//     compare_times("\nTotal Search Time (after all deletions):",
+//                   total_tombstone_search, total_rewiring_search);
 
-    double tombstone_total = total_tombstone_delete + total_tombstone_search;
-    double rewiring_total = total_rewiring_delete + total_rewiring_search;
-    compare_times("\nTotal Time (deletion + search):", tombstone_total, rewiring_total);
+//     double tombstone_total = total_tombstone_delete + total_tombstone_search;
+//     double rewiring_total = total_rewiring_delete + total_rewiring_search;
+//     compare_times("\nTotal Time (deletion + search):", tombstone_total, rewiring_total);
 
-    std::cout << "\nAverage deletion time per node:\n";
-    double avg_tombstone = total_tombstone_delete / nodes_to_delete.size();
-    double avg_rewiring = total_rewiring_delete / nodes_to_delete.size();
-    std::cout << "  Tombstone: " << avg_tombstone << " ms\n";
-    std::cout << "  Rewiring:  " << avg_rewiring << " ms\n";
+//     std::cout << "\nAverage deletion time per node:\n";
+//     double avg_tombstone = total_tombstone_delete / nodes_to_delete.size();
+//     double avg_rewiring = total_rewiring_delete / nodes_to_delete.size();
+//     std::cout << "  Tombstone: " << avg_tombstone << " ms\n";
+//     std::cout << "  Rewiring:  " << avg_rewiring << " ms\n";
 
-    std::cout << "\nAverage search time per query:\n";
-    double avg_tombstone_search = total_tombstone_search / nodes_to_delete.size();
-    double avg_rewiring_search = total_rewiring_search / nodes_to_delete.size();
-    std::cout << "  Tombstone: " << avg_tombstone_search << " ms\n";
-    std::cout << "  Rewiring:  " << avg_rewiring_search << " ms\n";
+//     std::cout << "\nAverage search time per query:\n";
+//     double avg_tombstone_search = total_tombstone_search / nodes_to_delete.size();
+//     double avg_rewiring_search = total_rewiring_search / nodes_to_delete.size();
+//     std::cout << "  Tombstone: " << avg_tombstone_search << " ms\n";
+//     std::cout << "  Rewiring:  " << avg_rewiring_search << " ms\n";
 
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Top-layer deletion test complete.\n";
-}
+//     std::cout << "\n" << std::string(70, '=') << "\n";
+//     std::cout << "Top-layer deletion test complete.\n";
+// }
 
 // // Test accuracy and performance degradation over sequential deletions
 // void test_sequential_deletion_degradation() {
@@ -3791,23 +3793,23 @@ void test_sequential_deletion_degradation() {
 
     // --------- Initialize three indexes ---------
     // SimpleHNSW hnsw_tomb(D, 64, 0.5f, 400, 42);
-    // SimpleHNSW hnsw_lr(D, 16, 0.5f, 200, 42);
-    SimpleHNSW hnsw_mnru(D, 32, 0.5f, 400, 42);
+    SimpleHNSW hnsw_lr(D, 32, 0.5f, 400, 42);
+    // SimpleHNSW hnsw_mnru(D, 32, 0.5f, 400, 42);
 
     std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
     for (int i = 0; i < N; ++i) {
         // hnsw_tomb.insert(labels[i], vectors[i]);
-        // hnsw_lr.insert(labels[i],   vectors[i]);
-        hnsw_mnru.insert(labels[i], vectors[i]);
+        hnsw_lr.insert(labels[i],   vectors[i]);
+        // hnsw_mnru.insert(labels[i], vectors[i]);
         if (checkpoints.count(i)) {
             std::cout << "Inserted vector " << i << " into all indexes\n";
         }
     }
     // hnsw_lr.force_connectivity_level0()
     std::cout << "Debugging connectivity of Tombstone index...\n";
-    hnsw_mnru.debug_connectivity();
+    hnsw_lr.debug_connectivity();
     std::cout << "Debugging degree of Tombstone index...\n";
-    hnsw_mnru.debug_degree_hist_level0();
+    hnsw_lr.debug_degree_hist_level0();
 
     // -------- Results structure --------
     // struct ResultRow {
@@ -3827,25 +3829,25 @@ void test_sequential_deletion_degradation() {
     //     double tomb_recall_update;
     // };
 
-    // struct ResultRow {
-    //     int deletions;
-    //     double lr_del;
-    //     double lr_srch_del;
-    //     double lr_recall_del;
-    //     double lr_update; 
-    //     double lr_srch_update;
-    //     double lr_recall_update;
-    // };
-
     struct ResultRow {
         int deletions;
-        // double mnru_del;
-        // double mnru_srch;
-        // double mnru_recall;
-        double mnru_update;
-        double mnru_srch_update;
-        double mnru_recall_update;
+        // double lr_del;
+        // double lr_srch_del;
+        // double lr_recall_del;
+        double lr_update; 
+        double lr_srch_update;
+        double lr_recall_update;
     };
+
+    // struct ResultRow {
+    //     int deletions;
+    //     // double mnru_del;
+    //     // double mnru_srch;
+    //     // double mnru_recall;
+    //     double mnru_update;
+    //     double mnru_srch_update;
+    //     double mnru_recall_update;
+    // };
 
     std::vector<ResultRow> table;
     int current_del = 0;
@@ -3877,13 +3879,13 @@ void test_sequential_deletion_degradation() {
         // double tomb_recall_delete = 0.0;
 
         // double lr_del_ms = 0.0;
-        // double lr_update_ms = 0.0;
+        double lr_update_ms = 0.0;
         // double lr_srch_delete = 0.0;
         // double lr_recall_delete = 0.0;
 
 
         // double mnru_del_ms = 0.0;
-        double mnru_update_ms = 0.0;
+        // double mnru_update_ms = 0.0;
         // double mnru_srch_ms_delete = 0.0;
         // double mnru_recall_delete = 0.0;
 
@@ -3963,27 +3965,27 @@ void test_sequential_deletion_degradation() {
             // const std::string lbl_updated = lbl + "_updated";
             // updated_labels[lbl_updated] = lbl; 
             auto start = std::chrono::steady_clock::now();
-            // hnsw_lr.mnru_update_replace_any_deleted(lbl_updated, vectors[indices[i]]);
+            hnsw_lr.delete_with_local_rewiring(lbl, vectors[indices[i]]);
             // hnsw_tomb.insert(lbl_updated, vectors[indices[i]]);
             // hnsw_tomb.insert_replace_deleted(lbl_updated, vectors[indices[i]]);
-            hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.5);
+            // hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.5);
             auto end   = std::chrono::steady_clock::now();
             // tomb_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            // lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            // mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
         }
         std::cout << "Debugging connectivity of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_mnru.debug_connectivity();
+        hnsw_lr.debug_connectivity();
         std::cout << "Debugging degree of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_mnru.debug_degree_hist_level0();
+        hnsw_lr.debug_degree_hist_level0();
 
         // --------- EVALUATION OVER Q QUERIES ---------
         // double tomb_srch_sum_update   = 0.0;
-        // double lr_srch_update     = 0.0;
-        double mnru_srch_update   = 0.0;
+        double lr_srch_update     = 0.0;
+        // double mnru_srch_update   = 0.0;
         // double tomb_recall_sum_update = 0.0;
-        // double lr_recall_update   = 0.0;
-        double mnru_recall_update = 0.0;
+        double lr_recall_update   = 0.0;
+        // double mnru_recall_update = 0.0;
 
         for (int qi = 0; qi < Q; ++qi) {
             const auto &qvec        = query_vectors[qi];
@@ -4016,16 +4018,16 @@ void test_sequential_deletion_degradation() {
 
             // ---- Search all 3 indexes ----
             // auto [tomb_res, tomb_ms]  = measure_search_query(hnsw_tomb, qvec);
-            // auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
-            auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
+            auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
+            // auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
 
-            // lr_srch_update += lr_ms;
+            lr_srch_update += lr_ms;
             // tomb_srch_sum_update   += tomb_ms;
-            mnru_srch_update += mnru_ms; 
+            // mnru_srch_update += mnru_ms; 
 
-            // lr_recall_update += compute_recall(lr_res);
+            lr_recall_update += compute_recall(lr_res);
             // tomb_recall_sum_update   += compute_recall(tomb_res);
-            mnru_recall_update += compute_recall(mnru_res);
+            // mnru_recall_update += compute_recall(mnru_res);
         }
 
         // Averages over Q queries
@@ -4037,14 +4039,14 @@ void test_sequential_deletion_degradation() {
 
         // double lr_srch_avg_delete  = lr_srch_delete   / Q;
         // double lr_recall_avg_delete = lr_recall_delete / Q;
-        // double lr_srch_avg_update = lr_srch_update / Q;
-        // double lr_recall_avg_update = lr_recall_update / Q;
+        double lr_srch_avg_update = lr_srch_update / Q;
+        double lr_recall_avg_update = lr_recall_update / Q;
 
 
         // double mnru_srch_avg_delete  = mnru_srch_ms_delete   / Q;
         // double mnru_recall_avg_delete = mnru_recall_delete / Q;
-        double mnru_srch_avg_update = mnru_srch_update / Q;
-        double mnru_recall_avg_update = mnru_recall_update / Q;
+        // double mnru_srch_avg_update = mnru_srch_update / Q;
+        // double mnru_recall_avg_update = mnru_recall_update / Q;
 
 
         // double lr_srch_avg     = lr_srch_sum     / Q; 
@@ -4072,25 +4074,25 @@ void test_sequential_deletion_degradation() {
         //     tomb_recall_avg_update
         // });
 
-        // table.push_back({
-        //     target_del,
-        //     lr_del_ms,
-        //     lr_srch_avg_delete,
-        //     lr_recall_avg_delete,
-        //     lr_update_ms,
-        //     lr_srch_avg_update,
-        //     lr_recall_avg_update
-        // });
-
         table.push_back({
             target_del,
-            // mnru_del_ms,
-            // mnru_srch_avg_delete,
-            // mnru_recall_avg_delete,
-            mnru_update_ms,
-            mnru_srch_avg_update,
-            mnru_recall_avg_update
+            // lr_del_ms,
+            // lr_srch_avg_delete,
+            // lr_recall_avg_delete,
+            lr_update_ms,
+            lr_srch_avg_update,
+            lr_recall_avg_update
         });
+
+        // table.push_back({
+        //     target_del,
+        //     // mnru_del_ms,
+        //     // mnru_srch_avg_delete,
+        //     // mnru_recall_avg_delete,
+        //     mnru_update_ms,
+        //     mnru_srch_avg_update,
+        //     mnru_recall_avg_update
+        // });
         
         current_del = target_del;
     }
@@ -4118,12 +4120,12 @@ void test_sequential_deletion_degradation() {
             //   << std::setw(20) << "Tombstone U"
             //   << std::setw(20) << "Tombstone S_U"
             //   << std::setw(20) << "Tombstone R_U"
-            //   << std::setw(20) << "LR_RN U"
-            //   << std::setw(20) << "LR_RN S_U"
-            //   << std::setw(20) << "LR_RN R_U"
-              << std::setw(20) << "MNRU U"
-              << std::setw(20) << "MNRU S_U"
-              << std::setw(20) << "MNRU R_U"
+              << std::setw(20) << "LR_RN U"
+              << std::setw(20) << "LR_RN S_U"
+              << std::setw(20) << "LR_RN R_U"
+            //   << std::setw(20) << "MNRU U"
+            //   << std::setw(20) << "MNRU S_U"
+            //   << std::setw(20) << "MNRU R_U"
               << "\n";
 
     for (const auto &r : table) {
@@ -4138,14 +4140,14 @@ void test_sequential_deletion_degradation() {
                 //   << std::setw(20) << r.mnru_recall
                 //   << std::setw(20) << r.lr_recall_del
                 //   << std::setw(20) << r.tomb_update
-                  << std::setw(20) << r.mnru_update
-                //   << std::setw(20) << r.lr_update
+                //   << std::setw(20) << r.mnru_update
+                  << std::setw(20) << r.lr_update
                 //   << std::setw(20) << r.tomb_srch_update
                 //   << std::setw(20) << r.tomb_recall_update
-                //   << std::setw(20) << r.lr_srch_update
-                //   << std::setw(20) << r.lr_recall_update
-                  << std::setw(20) << r.mnru_srch_update
-                  << std::setw(20) << r.mnru_recall_update
+                  << std::setw(20) << r.lr_srch_update
+                  << std::setw(20) << r.lr_recall_update
+                //   << std::setw(20) << r.mnru_srch_update
+                //   << std::setw(20) << r.mnru_recall_update
                   << "\n";
     }
 
