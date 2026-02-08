@@ -191,55 +191,54 @@ class SimpleHNSW {
 
     void insert_replace_deleted(const std::string &label,
                             const std::vector<float> &vector) {
-        if (!allow_replace_deleted_) {
-            // fall back to normal insert
-            insert(label, vector);
-            return;
-        }
+        // if (!allow_replace_deleted_) {
+        //     // fall back to normal insert
+        //     insert(label, vector);
+        //     return;
+        // }
 
-        if (static_cast<int>(vector.size()) != dim_) {
-            throw std::runtime_error("Vector dimensionality mismatch");
-        }
+        // if (static_cast<int>(vector.size()) != dim_) {
+        //     throw std::runtime_error("Vector dimensionality mismatch");
+        // }
 
-        // If label already exists and is not deleted => reject
-        if (label_to_id_.count(label) && !nodes_[label_to_id_[label]].deleted) {
-            throw std::runtime_error("Label already exists: " + label);
-        }
+        // // If label already exists and is not deleted => reject
+        // if (label_to_id_.count(label) && !nodes_[label_to_id_[label]].deleted) {
+        //     throw std::runtime_error("Label already exists: " + label);
+        // }
 
         // If we have a deleted slot, reuse it (hnswlib replace_deleted path)
-        if (!deleted_pool_.empty()) {
-            int reused_id = deleted_pool_.back();
-            deleted_pool_.pop_back();
+        // if (!deleted_pool_.empty()) {
+        int reused_id = label_to_id_[label];
+        // deleted_pool_.pop_back();
 
-            // remove old label mapping
-            std::string old_label = nodes_[reused_id].label;
-            if (!old_label.empty()) {
-                auto it = label_to_id_.find(old_label);
-                if (it != label_to_id_.end() && it->second == reused_id) {
-                    label_to_id_.erase(it);
-                }
+        // remove old label mapping
+        std::string old_label = nodes_[reused_id].label;
+        if (!old_label.empty()) {
+            auto it = label_to_id_.find(old_label);
+            if (it != label_to_id_.end() && it->second == reused_id) {
+                label_to_id_.erase(it);
             }
-
-            // overwrite data
-            nodes_[reused_id].label   = label;
-            nodes_[reused_id].vector  = vector;
-            nodes_[reused_id].deleted = false;
-
-            // update mapping
-            label_to_id_[label] = reused_id;
-
-            // IMPORTANT: do local repair similar to hnswlib updatePoint(..., prob=1.0)
-            update_point_local(reused_id, /*updateNeighborProbability=*/1.0f);
-
-            // entry point might have been deleted earlier; ensure it's valid
-            if (!entry_point_.has_value() || nodes_[entry_point_.value()].deleted) {
-                reassign_entry_point();
-            }
-            return;
         }
 
+        // overwrite data
+        nodes_[reused_id].label   = label;
+        nodes_[reused_id].vector  = vector;
+        nodes_[reused_id].deleted = false;
+
+        // update mapping
+        label_to_id_[label] = reused_id;
+
+        // IMPORTANT: do local repair similar to hnswlib updatePoint(..., prob=1.0)
+        update_point_local(reused_id, /*updateNeighborProbability=*/1.0f, /*alpha=*/1.1f);
+
+        // entry point might have been deleted earlier; ensure it's valid
+        // if (!entry_point_.has_value() || nodes_[entry_point_.value()].deleted) {
+        reassign_entry_point();
+        // }
+        return;
+
         // No reusable slot -> normal insert
-        insert(label, vector);
+        // insert(label, vector);
     }
 
     // --- MNRU Algorithm 3: update(deletedPoint, data, label) ---
@@ -370,21 +369,21 @@ class SimpleHNSW {
         //     nodes_[deleted_id].neighbors.erase(lvl);
         // }
         // auto start_update_deleted_neighbors = std::chrono::steady_clock::now();
-        for (int lvl = inherited_level; lvl >= 0; --lvl) {
-            auto it_old = nodes_[deleted_id].neighbors.find(lvl);
-            if (it_old != nodes_[deleted_id].neighbors.end()) {
-                std::vector<int> old(it_old->second.begin(), it_old->second.end());
-                // std::cout << "unlinking " << deleted_id << " " << old << " " << lvl << "\n";
-                for (int v : old) {
-                    // If the deleted node had no neighbors at this level, it could potentially create empty or missing links
-                    unlink(deleted_id, v, lvl);
-                    // if (nodes_[v].neighbors.count(lvl) > 1 || lvl == 0) {
-                    //     unlink(deleted_id, v, lvl);
-                    // }
-                }
-            }
-            nodes_[deleted_id].neighbors.erase(lvl);
-        }
+        // for (int lvl = inherited_level; lvl >= 0; --lvl) {
+        //     auto it_old = nodes_[deleted_id].neighbors.find(lvl);
+        //     if (it_old != nodes_[deleted_id].neighbors.end()) {
+        //         std::vector<int> old(it_old->second.begin(), it_old->second.end());
+        //         // std::cout << "unlinking " << deleted_id << " " << old << " " << lvl << "\n";
+        //         for (int v : old) {
+        //             // If the deleted node had no neighbors at this level, it could potentially create empty or missing links
+        //             unlink(deleted_id, v, lvl);
+        //             // if (nodes_[v].neighbors.count(lvl) > 1 || lvl == 0) {
+        //             //     unlink(deleted_id, v, lvl);
+        //             // }
+        //         }
+        //     }
+        //     nodes_[deleted_id].neighbors.erase(lvl);
+        // }
         // auto end_update_deleted_neighbors = std::chrono::steady_clock::now();
         // auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_update_deleted_neighbors - start_update_deleted_neighbors);
         // std::cout << "unlinking took " << elapsed.count() << " ms\n";
@@ -491,9 +490,9 @@ class SimpleHNSW {
         auto end = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         // std::cout << "Time taken: " << duration.count() << " ms" << std::endl;
-        if (!entry_point_.has_value() || nodes_[entry_point_.value()].deleted) {
-                reassign_entry_point();
-            }
+        // if (!entry_point_.has_value() || nodes_[entry_point_.value()].deleted) {
+        reassign_entry_point();
+            // }
         return st;
     }
 
@@ -532,7 +531,7 @@ class SimpleHNSW {
         node.deleted = false;
 
         // hnswlib-like: local repair (node + neighbors), no global rebuild
-        update_point_local(node_id, /*updateNeighborProbability=*/1.0f);
+        update_point_local(node_id, /*updateNeighborProbability=*/1.0f, /*alpha=*/1.1f);
 
         if (!entry_point_.has_value() || nodes_[entry_point_.value()].deleted) {
             reassign_entry_point();
@@ -629,7 +628,7 @@ class SimpleHNSW {
             throw std::runtime_error("Label not found: " + label);
         }
         int node_id = label_to_id_[label];
-        float alpha = 1.0f;
+        float alpha = 1.1f;
         if (nodes_[node_id].deleted) {
             throw std::runtime_error("Label already deleted: " + label);
         }
@@ -679,15 +678,23 @@ class SimpleHNSW {
             //         if (it_v->second.empty()) nodes_[v].neighbors.erase(lvl);
             //     }
             // }
-            std::unordered_map<int, std::vector<int>> new_layer_neighbors;
-            new_layer_neighbors.reserve(layer_neighbors.size());
-            for (int v : layer_neighbors) {
-                nodes_[v].neighbors[lvl].insert(stats.representative_node);
-                nodes_[stats.representative_node].neighbors[lvl].insert(v);
-            }
+            // std::unordered_map<int, std::vector<int>> new_layer_neighbors;
+            // new_layer_neighbors.reserve(layer_neighbors.size());
+            // for (int v : layer_neighbors) {
+            //     nodes_[v].neighbors[lvl].insert(stats.representative_node);
+            //     nodes_[stats.representative_node].neighbors[lvl].insert(v);
+            // }
 
-            std::vector <int> pruned_neighbors = prune_alpha_rng(stats.representative_node, layer_neighbors, alpha);
-            nodes_[stats.representative_node].neighbors[lvl].insert(pruned_neighbors.begin(), pruned_neighbors.end());
+            
+
+            // std::vector <int> pruned_neighbors = prune_alpha_rng(stats.representative_node, layer_neighbors, alpha);
+            // nodes_[stats.representative_node].neighbors[lvl].insert(pruned_neighbors.begin(), pruned_neighbors.end());
+
+            // for (int v: pruned_neighbors) {
+            //     if (nodes_[v].deleted) continue;
+            //     link(stats.representative_node, v, lvl, alpha);
+            // }
+
             // prune_neighbors(stats.representative_node, lvl);
             // new_layer_neighbors = local_rewire_layer_representative(stats.representative_node,
             //     layer_neighbors,
@@ -703,19 +710,21 @@ class SimpleHNSW {
             //     nodes_[u].neighbors[lvl] = std::move(newSet);
             // }
             // Ensure mutual link consistency at this level (bounded to m_)
-            for (int u : layer_neighbors) {
-                // prune_neighbors(u, lvl);
-                const auto &u_set = nodes_[u].neighbors[lvl];   
-                std::vector<int> lvl_neighbors;
-                for (int v : u_set) {
-                    if (!nodes_[v].deleted) {
-                        lvl_neighbors.push_back(v);
-                    }
-                }
-                std::vector <int> pruned_neighbors_u = prune_alpha_rng(u, lvl_neighbors, alpha);
-                nodes_[u].neighbors[lvl].insert(pruned_neighbors_u.begin(), pruned_neighbors_u.end());
-            }
-            node.neighbors.erase(lvl);
+            // for (int u : layer_neighbors) {
+            //     // prune_neighbors(u, lvl);
+            //     const auto &u_set = nodes_[u].neighbors[lvl];   
+            //     std::vector<int> lvl_neighbors;
+            //     for (int v : u_set) {
+            //         if (!nodes_[v].deleted) {
+            //             lvl_neighbors.push_back(v);
+            //         }
+            //     }
+            //     std::vector <int> pruned_neighbors_u = prune_alpha_rng(u, lvl_neighbors, alpha);
+            //     nodes_[u].neighbors[lvl].insert(pruned_neighbors_u.begin(), pruned_neighbors_u.end());
+            // }
+
+            // node.neighbors.erase(lvl);
+            rebuild_node_neighbors_from_candidates(stats.representative_node, lvl, layer_neighbors, alpha);
         }
 
         node.deleted = true;
@@ -723,9 +732,9 @@ class SimpleHNSW {
             deleted_pool_.push_back(node_id);
         }
         mnru_update_deleted_id(node_id, label, new_vec, alpha);
-        if (entry_point_.value() == node_id) {
-            reassign_entry_point();
-        }
+        // if (entry_point_.value() == node_id) {
+        //     reassign_entry_point();
+        // }
         
         return stats;
     }
@@ -978,9 +987,9 @@ class SimpleHNSW {
         mnru_update_deleted_id(node_id, label, new_vec, alpha);
         
 
-        if (entry_point_.has_value() && entry_point_.value() == node_id) {
-            reassign_entry_point();
-        }
+        // if (entry_point_.has_value() && entry_point_.value() == node_id) {
+        //     reassign_entry_point();
+        // }
 
         return stats;
     }
@@ -1321,7 +1330,7 @@ class SimpleHNSW {
     }
 
 
-    void update_point_local(int node_id, float updateNeighborProbability) {
+    void update_point_local(int node_id, float updateNeighborProbability, float alpha) {
         if (nodes_[node_id].deleted) return;
 
         std::uniform_real_distribution<float> uni(0.0f, 1.0f);
@@ -1329,7 +1338,7 @@ class SimpleHNSW {
         for (int level = nodes_[node_id].level; level >= 0; --level) {
             // 1) rebuild the updated node at this level
             auto cands = collect_two_hop_candidates(node_id, level);
-            rebuild_node_neighbors_from_candidates(node_id, level, cands);
+            rebuild_node_neighbors_from_candidates(node_id, level, cands, alpha);
 
             // 2) optionally rebuild some neighbors as well (hnswlib does this)
             auto it = nodes_[node_id].neighbors.find(level);
@@ -1342,15 +1351,15 @@ class SimpleHNSW {
 
                 if (uni(rng_) <= updateNeighborProbability) {
                     auto cands_n = collect_two_hop_candidates(n, level);
-                    rebuild_node_neighbors_from_candidates(n, level, cands_n);
+                    rebuild_node_neighbors_from_candidates(n, level, cands_n, alpha);
                 }
             }
         }
-        repair_connections_for_update(node_id, 1.1);
+        repair_connections_for_update(node_id, alpha);
     }
 
     void rebuild_node_neighbors_from_candidates(int u, int level,
-                                           const std::vector<int>& candidates) {
+                                           const std::vector<int>& candidates, float alpha) {
         if (nodes_[u].deleted) return;
 
         // Remove existing edges at this level (symmetrically)
@@ -1386,52 +1395,53 @@ class SimpleHNSW {
 
         // Choose neighbors (heuristic or simple)
         int cap = m_;
-        auto chosen = select_neighbors_heuristic(nodes_[u].vector, cand_ids, cap);
-        if (chosen.empty()) {
-            // fallback: simple top-m_
-            chosen = select_neighbors_simple(nodes_[u].vector, cand_ids, cap);
-        }
+        // auto chosen = select_neighbors_heuristic(nodes_[u].vector, cand_ids, cap);
+        std::vector<int> pruned = prune_alpha_rng(u, cand_ids, alpha);
+        // if (chosen.empty()) {
+        //     // fallback: simple top-m_
+        //     chosen = select_neighbors_simple(nodes_[u].vector, cand_ids, cap);
+        // }
 
         
 
-        for (int node : chosen) {
-            const auto &u_set = nodes_[node].neighbors[level];
+        // for (int node : chosen) {
+        //     const auto &u_set = nodes_[node].neighbors[level];
 
-            for (int v : u_set) {
-                if (nodes_[v].deleted) continue;
-                if (nodes_[v].level < level) continue;
+        //     for (int v : u_set) {
+        //         if (nodes_[v].deleted) continue;
+        //         if (nodes_[v].level < level) continue;
 
-                auto &v_set = nodes_[v].neighbors[level];
+        //         auto &v_set = nodes_[v].neighbors[level];
 
-                if (v_set.count(node)) continue;
+        //         if (v_set.count(node)) continue;
 
-                if ((int)v_set.size() < m_) {
-                    v_set.insert(node);
-                } else {
-                    // Replace worst neighbor of v if u is better
-                    int worst = -1;
-                    float worst_dist = -1.0f;
+        //         if ((int)v_set.size() < m_) {
+        //             v_set.insert(node);
+        //         } else {
+        //             // Replace worst neighbor of v if u is better
+        //             int worst = -1;
+        //             float worst_dist = -1.0f;
 
-                    for (int x : v_set) {
-                        float d = distance(nodes_[v].vector, nodes_[x].vector);
-                        if (d > worst_dist) { worst_dist = d; worst = x; }
-                    }
+        //             for (int x : v_set) {
+        //                 float d = distance(nodes_[v].vector, nodes_[x].vector);
+        //                 if (d > worst_dist) { worst_dist = d; worst = x; }
+        //             }
 
-                    float d_new = distance(nodes_[v].vector, nodes_[u].vector);
+        //             float d_new = distance(nodes_[v].vector, nodes_[u].vector);
 
-                    if (worst != -1 && d_new < worst_dist) {
-                        v_set.erase(worst);
-                        v_set.insert(node);
-                    }
-                }
-            }
-        }
+        //             if (worst != -1 && d_new < worst_dist) {
+        //                 v_set.erase(worst);
+        //                 v_set.insert(node);
+        //             }
+        //         }
+        //     }
+        // }
 
         // // Add edges (use link_new_node-like semantics so u stays connected)
-        // for (int v : chosen) {
-        //     if (nodes_[v].deleted) continue;
-        //     link(u, v, level, 1.1);
-        // }
+        for (int v : pruned) {
+            if (nodes_[v].deleted) continue;
+            link(u, v, level, alpha);
+        }
 
         
         
@@ -3796,9 +3806,9 @@ void test_sequential_deletion_degradation() {
     std::shuffle(indices.begin(), indices.end(), rng);
 
     // --------- Initialize three indexes ---------
-    // SimpleHNSW hnsw_tomb(D, 64, 0.5f, 400, 42);
+    // SimpleHNSW hnsw_tomb(D, 16, 0.5f, 400, 42);
     SimpleHNSW hnsw_lr(D, 16, 0.5f, 400, 42);
-    // SimpleHNSW hnsw_mnru(D, 32, 0.5f, 400, 42);
+    // SimpleHNSW hnsw_mnru(D, 16, 0.5f, 400, 42);
 
     std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
     for (int i = 0; i < N; ++i) {
@@ -3825,9 +3835,9 @@ void test_sequential_deletion_degradation() {
 
     // struct ResultRow {
     //     int deletions;
-    //     double tomb_del;
-    //     double tomb_srch_del;
-    //     double tomb_recall_del;
+    //     // double tomb_del;
+    //     // double tomb_srch_del;
+    //     // double tomb_recall_del;
     //     double tomb_update;
     //     double tomb_srch_update;
     //     double tomb_recall_update;
@@ -3971,8 +3981,8 @@ void test_sequential_deletion_degradation() {
             auto start = std::chrono::steady_clock::now();
             hnsw_lr.delete_with_local_rewiring(lbl, vectors[indices[i]]);
             // hnsw_tomb.insert(lbl_updated, vectors[indices[i]]);
-            // hnsw_tomb.insert_replace_deleted(lbl_updated, vectors[indices[i]]);
-            // hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.5);
+            // hnsw_tomb.insert_replace_deleted(lbl, vectors[indices[i]]);
+            // hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.1);
             auto end   = std::chrono::steady_clock::now();
             // tomb_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
             // mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
@@ -4070,9 +4080,9 @@ void test_sequential_deletion_degradation() {
  
         // table.push_back({
         //     target_del,
-        //     tomb_del_ms,
-        //     tomb_srch_avg_delete,
-        //     tomb_recall_avg_delete,
+        //     // tomb_del_ms,
+        //     // tomb_srch_avg_delete,
+        //     // tomb_recall_avg_delete,
         //     tomb_update_ms,
         //     tomb_srch_avg_update,
         //     tomb_recall_avg_update
