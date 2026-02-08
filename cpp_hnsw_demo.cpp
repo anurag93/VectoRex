@@ -686,7 +686,7 @@ class SimpleHNSW {
                 nodes_[stats.representative_node].neighbors[lvl].insert(v);
             }
 
-            std::vector <int> pruned_neighbors = prune_alpha_rng(stats.representative_node, layer_neighbors, 1);
+            std::vector <int> pruned_neighbors = prune_alpha_rng(stats.representative_node, layer_neighbors, alpha);
             nodes_[stats.representative_node].neighbors[lvl].insert(pruned_neighbors.begin(), pruned_neighbors.end());
             // prune_neighbors(stats.representative_node, lvl);
             // new_layer_neighbors = local_rewire_layer_representative(stats.representative_node,
@@ -712,7 +712,7 @@ class SimpleHNSW {
                         lvl_neighbors.push_back(v);
                     }
                 }
-                std::vector <int> pruned_neighbors_u = prune_alpha_rng(u, lvl_neighbors, 1);
+                std::vector <int> pruned_neighbors_u = prune_alpha_rng(u, lvl_neighbors, alpha);
                 nodes_[u].neighbors[lvl].insert(pruned_neighbors_u.begin(), pruned_neighbors_u.end());
             }
             node.neighbors.erase(lvl);
@@ -722,10 +722,11 @@ class SimpleHNSW {
         if (allow_replace_deleted_) {
             deleted_pool_.push_back(node_id);
         }
+        mnru_update_deleted_id(node_id, label, new_vec, alpha);
         if (entry_point_.value() == node_id) {
             reassign_entry_point();
         }
-        mnru_update_deleted_id(node_id, label, new_vec, alpha);
+        
         return stats;
     }
 
@@ -1292,10 +1293,10 @@ class SimpleHNSW {
 
             // Pick neighbors and connect
             int cap = m_;
-            auto chosen = select_neighbors_heuristic(q, candidates, cap);
-            if (chosen.empty()) {
-                chosen = select_neighbors_simple(q, candidates, cap);
-            }
+            auto chosen = prune_alpha_rng(node_id, candidates, alpha);
+            // if (chosen.empty()) {
+            //     chosen = select_neighbors_simple(q, candidates, cap);
+            // }
 
             // Ensure node has at least something if possible (avoid isolating it)
             // If chosen is empty but we have candidates, fall back to the nearest.
@@ -1304,7 +1305,9 @@ class SimpleHNSW {
             }
 
             for (int v : chosen) {
-                link(node_id, v, lvl, alpha);
+                nodes_[node_id].neighbors[lvl].insert(v);
+                nodes_[v].neighbors[lvl].insert(node_id);
+                // link(node_id, v, lvl, alpha);
                 // nodes_[node_id].neighbors[lvl].insert(v);
                 // nodes_[v].neighbors[lvl].insert(node_id);
             }
@@ -1587,7 +1590,8 @@ class SimpleHNSW {
             if (good) {
                 result.push_back(p.second);
                 if ((int)result.size() >= M) break;
-            } else {
+            }
+            else {
                 rejected.push_back(p.second);
             }
         }
@@ -3793,7 +3797,7 @@ void test_sequential_deletion_degradation() {
 
     // --------- Initialize three indexes ---------
     // SimpleHNSW hnsw_tomb(D, 64, 0.5f, 400, 42);
-    SimpleHNSW hnsw_lr(D, 32, 0.5f, 400, 42);
+    SimpleHNSW hnsw_lr(D, 16, 0.5f, 400, 42);
     // SimpleHNSW hnsw_mnru(D, 32, 0.5f, 400, 42);
 
     std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
