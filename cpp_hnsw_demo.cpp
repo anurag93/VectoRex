@@ -904,83 +904,84 @@ class SimpleHNSW {
                 // for (int v : C) {
                 //     link(u, v, level, alpha);
                 // }
+                rebuild_node_neighbors_from_candidates(u, level, C, alpha);
                 // α-RNG prune
-                std::vector<int> pruned = prune_alpha_rng(u, C, alpha);
+                // std::vector<int> pruned = prune_alpha_rng(u, C, alpha);
                 // std::vector<int> pruned = prune_neighbors(u, level);
-                new_layer_neighbors.emplace(u, std::move(pruned));
+                // new_layer_neighbors.emplace(u, std::move(pruned));
                 // link(u, level, C);
             }
 
             // Apply new neighbor sets for this level
-            for (auto &p : new_layer_neighbors) {
-                int u = p.first;
-                std::unordered_set<int> newSet;
-                newSet.reserve(p.second.size());
-                for (int v : p.second) newSet.insert(v);
-                nodes_[u].neighbors[level] = std::move(newSet);
-            }
+            // for (auto &p : new_layer_neighbors) {
+            //     int u = p.first;
+            //     std::unordered_set<int> newSet;
+            //     newSet.reserve(p.second.size());
+            //     for (int v : p.second) newSet.insert(v);
+            //     nodes_[u].neighbors[level] = std::move(newSet);
+            // }
 
             // Ensure mutual link consistency at this level (bounded to m_)
-            for (const auto &p : new_layer_neighbors) {
-                // int u = p.first;
-                // const auto &u_set = nodes_[u].neighbors[level];
+            // for (const auto &p : new_layer_neighbors) {
+            //     // int u = p.first;
+            //     // const auto &u_set = nodes_[u].neighbors[level];
 
-                std::unordered_set<int> newSet;
-                newSet.reserve(p.second.size());
-                for (int v : p.second) newSet.insert(v);
+            //     std::unordered_set<int> newSet;
+            //     newSet.reserve(p.second.size());
+            //     for (int v : p.second) newSet.insert(v);
 
-                int u = p.first;
-                for (int v : newSet) {
-                    if (nodes_[v].deleted) continue;
-                    if (nodes_[v].level <= level) continue;
-                    auto &v_set = nodes_[v].neighbors[level];
-                    v_set.insert(u);
-                    std::vector<int> candidates_v;
-                    for (int x : v_set) candidates_v.push_back(x);
-                    std::vector<int> pruned_v = prune_alpha_rng(v, candidates_v, alpha);
-                    // nodes_[u].neighbors[level].clear();
-                    nodes_[v].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
-                }
+            //     int u = p.first;
+            //     for (int v : newSet) {
+            //         if (nodes_[v].deleted) continue;
+            //         if (nodes_[v].level <= level) continue;
+            //         auto &v_set = nodes_[v].neighbors[level];
+            //         v_set.insert(u);
+            //         std::vector<int> candidates_v;
+            //         for (int x : v_set) candidates_v.push_back(x);
+            //         std::vector<int> pruned_v = prune_alpha_rng(v, candidates_v, alpha);
+            //         // nodes_[u].neighbors[level].clear();
+            //         nodes_[v].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
+            //     }
                 
-                // for (int v : u_set) {
-                //     if (nodes_[v].deleted) continue;
-                //     if (nodes_[v].level != level) continue;
-                //     std::vector<int> candidates_v;
-                //     // auto &v_set = nodes_[v].neighbors[level];
+            //     // for (int v : u_set) {
+            //     //     if (nodes_[v].deleted) continue;
+            //     //     if (nodes_[v].level != level) continue;
+            //     //     std::vector<int> candidates_v;
+            //     //     // auto &v_set = nodes_[v].neighbors[level];
 
-                //     // if (v_set.count(u)) continue;
+            //     //     // if (v_set.count(u)) continue;
                     
-                //     // v_set.insert(u);
+            //     //     // v_set.insert(u);
                     
-                //     // for (int x : v_set) candidates_v.push_back(x);
-                //     candidates_v.push_back(v);
-                // }
-                // std::vector<int> pruned_v = prune_alpha_rng(u, candidates_v, alpha);
-                //  nodes_[u].neighbors[level].clear();
-                // nodes_[u].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
+            //     //     // for (int x : v_set) candidates_v.push_back(x);
+            //     //     candidates_v.push_back(v);
+            //     // }
+            //     // std::vector<int> pruned_v = prune_alpha_rng(u, candidates_v, alpha);
+            //     //  nodes_[u].neighbors[level].clear();
+            //     // nodes_[u].neighbors[level].insert(pruned_v.begin(), pruned_v.end());
 
-                    // if ((int)v_set.size() < m_) {
-                    //     v_set.insert(u); 
-                    // } else {
-                    //     // Replace worst neighbor of v if u is better
-                    //     int worst = -1;
-                    //     float worst_dist = -1.0f;
+            //         // if ((int)v_set.size() < m_) {
+            //         //     v_set.insert(u); 
+            //         // } else {
+            //         //     // Replace worst neighbor of v if u is better
+            //         //     int worst = -1;
+            //         //     float worst_dist = -1.0f;
 
-                    //     for (int x : v_set) {
-                    //         float d = distance(nodes_[v].vector, nodes_[x].vector);
-                    //         stats.distance_evals++;
-                    //         if (d > worst_dist) { worst_dist = d; worst = x; }
-                    //     }
+            //         //     for (int x : v_set) {
+            //         //         float d = distance(nodes_[v].vector, nodes_[x].vector);
+            //         //         stats.distance_evals++;
+            //         //         if (d > worst_dist) { worst_dist = d; worst = x; }
+            //         //     }
 
-                    //     float d_new = distance(nodes_[v].vector, nodes_[u].vector);
-                    //     stats.distance_evals++;
+            //         //     float d_new = distance(nodes_[v].vector, nodes_[u].vector);
+            //         //     stats.distance_evals++;
 
-                    //     if (worst != -1 && d_new < worst_dist) {
-                    //         v_set.erase(worst);
-                    //         v_set.insert(u);
-                    //     }
-                    // }
-            }
+            //         //     if (worst != -1 && d_new < worst_dist) {
+            //         //         v_set.erase(worst);
+            //         //         v_set.insert(u);
+            //         //     }
+            //         // }
+            // }
 
             // Remove this level's edges from deleted node
             del_node.neighbors.erase(level);
@@ -3833,23 +3834,23 @@ void test_sequential_deletion_degradation() {
 
     // --------- Initialize three indexes ---------
     // SimpleHNSW hnsw_tomb(D, 16, 0.5f, 400, 42);
-    SimpleHNSW hnsw_lr(D, 16, 0.5f, 400, 42);
-    // SimpleHNSW hnsw_mnru(D, 16, 0.5f, 400, 42);
+    // SimpleHNSW hnsw_lr(D, 16, 0.5f, 400, 42);
+    SimpleHNSW hnsw_mnru(D, 16, 0.5f, 400, 42);
 
     std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
     for (int i = 0; i < N; ++i) {
         // hnsw_tomb.insert(labels[i], vectors[i]);
-        hnsw_lr.insert(labels[i],   vectors[i]);
-        // hnsw_mnru.insert(labels[i], vectors[i]);
+        // hnsw_lr.insert(labels[i],   vectors[i]);
+        hnsw_mnru.insert(labels[i], vectors[i]);
         if (checkpoints.count(i)) {
             std::cout << "Inserted vector " << i << " into all indexes\n";
         }
     }
     // hnsw_lr.force_connectivity_level0()
     std::cout << "Debugging connectivity of Tombstone index...\n";
-    hnsw_lr.debug_connectivity();
+    hnsw_mnru.debug_connectivity();
     std::cout << "Debugging degree of Tombstone index...\n";
-    hnsw_lr.debug_degree_hist_level0();
+    hnsw_mnru.debug_degree_hist_level0();
 
     // -------- Results structure --------
     // struct ResultRow {
@@ -3869,25 +3870,25 @@ void test_sequential_deletion_degradation() {
     //     double tomb_recall_update;
     // };
 
-    struct ResultRow {
-        int deletions;
-        // double lr_del;
-        // double lr_srch_del;
-        // double lr_recall_del;
-        double lr_update; 
-        double lr_srch_update;
-        double lr_recall_update;
-    };
-
     // struct ResultRow {
     //     int deletions;
-    //     // double mnru_del;
-    //     // double mnru_srch;
-    //     // double mnru_recall;
-    //     double mnru_update;
-    //     double mnru_srch_update;
-    //     double mnru_recall_update;
+    //     // double lr_del;
+    //     // double lr_srch_del;
+    //     // double lr_recall_del;
+    //     double lr_update; 
+    //     double lr_srch_update;
+    //     double lr_recall_update;
     // };
+
+    struct ResultRow {
+        int deletions;
+        // double mnru_del;
+        // double mnru_srch;
+        // double mnru_recall;
+        double mnru_update;
+        double mnru_srch_update;
+        double mnru_recall_update;
+    };
 
     std::vector<ResultRow> table;
     int current_del = 0;
@@ -3919,13 +3920,13 @@ void test_sequential_deletion_degradation() {
         // double tomb_recall_delete = 0.0;
 
         // double lr_del_ms = 0.0;
-        double lr_update_ms = 0.0;
+        // double lr_update_ms = 0.0;
         // double lr_srch_delete = 0.0;
         // double lr_recall_delete = 0.0;
 
 
         // double mnru_del_ms = 0.0;
-        // double mnru_update_ms = 0.0;
+        double mnru_update_ms = 0.0;
         // double mnru_srch_ms_delete = 0.0;
         // double mnru_recall_delete = 0.0;
 
@@ -4005,27 +4006,27 @@ void test_sequential_deletion_degradation() {
             // const std::string lbl_updated = lbl + "_updated";
             // updated_labels[lbl_updated] = lbl; 
             auto start = std::chrono::steady_clock::now();
-            hnsw_lr.delete_with_local_rewiring(lbl, vectors[indices[i]]);
+            // hnsw_lr.delete_with_local_rewiring(lbl, vectors[indices[i]]);
             // hnsw_tomb.insert(lbl_updated, vectors[indices[i]]);
             // hnsw_tomb.insert_replace_deleted(lbl, vectors[indices[i]]);
-            // hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.1);
+            hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.1);
             auto end   = std::chrono::steady_clock::now();
             // tomb_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            // mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            // lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
         }
         std::cout << "Debugging connectivity of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_lr.debug_connectivity();
+        hnsw_mnru.debug_connectivity();
         std::cout << "Debugging degree of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_lr.debug_degree_hist_level0();
+        hnsw_mnru.debug_degree_hist_level0();
 
         // --------- EVALUATION OVER Q QUERIES ---------
         // double tomb_srch_sum_update   = 0.0;
-        double lr_srch_update     = 0.0;
-        // double mnru_srch_update   = 0.0;
+        // double lr_srch_update     = 0.0;
+        double mnru_srch_update   = 0.0;
         // double tomb_recall_sum_update = 0.0;
-        double lr_recall_update   = 0.0;
-        // double mnru_recall_update = 0.0;
+        // double lr_recall_update   = 0.0;
+        double mnru_recall_update = 0.0;
 
         for (int qi = 0; qi < Q; ++qi) {
             const auto &qvec        = query_vectors[qi];
@@ -4058,16 +4059,16 @@ void test_sequential_deletion_degradation() {
 
             // ---- Search all 3 indexes ----
             // auto [tomb_res, tomb_ms]  = measure_search_query(hnsw_tomb, qvec);
-            auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
-            // auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
+            // auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
+            auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
 
-            lr_srch_update += lr_ms;
+            // lr_srch_update += lr_ms;
             // tomb_srch_sum_update   += tomb_ms;
-            // mnru_srch_update += mnru_ms; 
+            mnru_srch_update += mnru_ms; 
 
-            lr_recall_update += compute_recall(lr_res);
+            // lr_recall_update += compute_recall(lr_res);
             // tomb_recall_sum_update   += compute_recall(tomb_res);
-            // mnru_recall_update += compute_recall(mnru_res);
+            mnru_recall_update += compute_recall(mnru_res);
         }
 
         // Averages over Q queries
@@ -4079,14 +4080,14 @@ void test_sequential_deletion_degradation() {
 
         // double lr_srch_avg_delete  = lr_srch_delete   / Q;
         // double lr_recall_avg_delete = lr_recall_delete / Q;
-        double lr_srch_avg_update = lr_srch_update / Q;
-        double lr_recall_avg_update = lr_recall_update / Q;
+        // double lr_srch_avg_update = lr_srch_update / Q;
+        // double lr_recall_avg_update = lr_recall_update / Q;
 
 
         // double mnru_srch_avg_delete  = mnru_srch_ms_delete   / Q;
         // double mnru_recall_avg_delete = mnru_recall_delete / Q;
-        // double mnru_srch_avg_update = mnru_srch_update / Q;
-        // double mnru_recall_avg_update = mnru_recall_update / Q;
+        double mnru_srch_avg_update = mnru_srch_update / Q;
+        double mnru_recall_avg_update = mnru_recall_update / Q;
 
 
         // double lr_srch_avg     = lr_srch_sum     / Q; 
@@ -4114,25 +4115,25 @@ void test_sequential_deletion_degradation() {
         //     tomb_recall_avg_update
         // });
 
-        table.push_back({
-            target_del,
-            // lr_del_ms,
-            // lr_srch_avg_delete,
-            // lr_recall_avg_delete,
-            lr_update_ms,
-            lr_srch_avg_update,
-            lr_recall_avg_update
-        });
-
         // table.push_back({
         //     target_del,
-        //     // mnru_del_ms,
-        //     // mnru_srch_avg_delete,
-        //     // mnru_recall_avg_delete,
-        //     mnru_update_ms,
-        //     mnru_srch_avg_update,
-        //     mnru_recall_avg_update
+        //     // lr_del_ms,
+        //     // lr_srch_avg_delete,
+        //     // lr_recall_avg_delete,
+        //     lr_update_ms,
+        //     lr_srch_avg_update,
+        //     lr_recall_avg_update
         // });
+
+        table.push_back({
+            target_del,
+            // mnru_del_ms,
+            // mnru_srch_avg_delete,
+            // mnru_recall_avg_delete,
+            mnru_update_ms,
+            mnru_srch_avg_update,
+            mnru_recall_avg_update
+        });
         
         current_del = target_del;
     }
@@ -4160,12 +4161,12 @@ void test_sequential_deletion_degradation() {
             //   << std::setw(20) << "Tombstone U"
             //   << std::setw(20) << "Tombstone S_U"
             //   << std::setw(20) << "Tombstone R_U"
-              << std::setw(20) << "LR_RN U"
-              << std::setw(20) << "LR_RN S_U"
-              << std::setw(20) << "LR_RN R_U"
-            //   << std::setw(20) << "MNRU U"
-            //   << std::setw(20) << "MNRU S_U"
-            //   << std::setw(20) << "MNRU R_U"
+            //   << std::setw(20) << "LR_RN U"
+            //   << std::setw(20) << "LR_RN S_U"
+            //   << std::setw(20) << "LR_RN R_U"
+              << std::setw(20) << "MNRU U"
+              << std::setw(20) << "MNRU S_U"
+              << std::setw(20) << "MNRU R_U"
               << "\n";
 
     for (const auto &r : table) {
@@ -4180,14 +4181,14 @@ void test_sequential_deletion_degradation() {
                 //   << std::setw(20) << r.mnru_recall
                 //   << std::setw(20) << r.lr_recall_del
                 //   << std::setw(20) << r.tomb_update
-                //   << std::setw(20) << r.mnru_update
-                  << std::setw(20) << r.lr_update
+                  << std::setw(20) << r.mnru_update
+                //   << std::setw(20) << r.lr_update
                 //   << std::setw(20) << r.tomb_srch_update
                 //   << std::setw(20) << r.tomb_recall_update
-                  << std::setw(20) << r.lr_srch_update
-                  << std::setw(20) << r.lr_recall_update
-                //   << std::setw(20) << r.mnru_srch_update
-                //   << std::setw(20) << r.mnru_recall_update
+                //   << std::setw(20) << r.lr_srch_update
+                //   << std::setw(20) << r.lr_recall_update
+                  << std::setw(20) << r.mnru_srch_update
+                  << std::setw(20) << r.mnru_recall_update
                   << "\n";
     }
 
