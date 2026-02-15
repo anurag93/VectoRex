@@ -661,16 +661,22 @@ class SimpleHNSW {
         // Choose representative randomly (matching Python "random" strategy)
         std::uniform_int_distribution<int> dist(0, static_cast<int>(base_neighbors.size()) - 1);
         stats.representative_node = base_neighbors[dist(rng_)];
-
-        for (int lvl = std::min(node.level, nodes_[stats.representative_node].level); lvl >= 0; --lvl) {
+        // std::cout << "Top level: " << max_level_ << std::endl;
+        for (int lvl = node.level; lvl >= 0; --lvl) {
             std::vector<int> layer_neighbors;
+            // std::cout << "Level: " << lvl << std::endl;
+            // std::cout << "Node: " << node_id << std::endl;
+            // std::cout << "Representative: " << stats.representative_node << std::endl;
+            // std::cout << "------------------" << std::endl;
             if (node.neighbors.count(lvl)) {
                 for (int n : node.neighbors[lvl]) {
                     if (!nodes_[n].deleted) {
                         layer_neighbors.push_back(n);
+                        // std::cout << "Neighbors: " << n << std::endl;
                     }
                 }
             }
+            // std::cout << "------------------" << std::endl;
             // for (int v : layer_neighbors) {
             //     auto it_v = nodes_[v].neighbors.find(lvl);
             //     if (it_v != nodes_[v].neighbors.end()) {
@@ -1286,7 +1292,7 @@ class SimpleHNSW {
         }
 
         // 2) For each level node participates in, do a local search and connect
-        for (int lvl = std::min(nodes_[node_id].level, max_level_); lvl >= 0; --lvl) {
+        for (int lvl = nodes_[node_id].level; lvl >= 0; --lvl) {
             // Search within this layer for candidates around q
             auto [top, _path] = search_layer(q, ep, lvl, ef_construction_, /*track_path=*/false);
 
@@ -1302,21 +1308,30 @@ class SimpleHNSW {
 
             // Pick neighbors and connect
             int cap = m_;
-            auto chosen = prune_alpha_rng(node_id, candidates, alpha);
+            // auto chosen = prune_alpha_rng(node_id, candidates, alpha);
             // if (chosen.empty()) {
             //     chosen = select_neighbors_simple(q, candidates, cap);
             // }
 
             // Ensure node has at least something if possible (avoid isolating it)
             // If chosen is empty but we have candidates, fall back to the nearest.
-            if (chosen.empty() && !candidates.empty()) {
-                chosen.push_back(candidates[0]);
-            }
+            // if (chosen.empty() && !candidates.empty()) {
+            //     chosen.push_back(candidates[0]);
+            // }
 
-            for (int v : chosen) {
-                nodes_[node_id].neighbors[lvl].insert(v);
-                nodes_[v].neighbors[lvl].insert(node_id);
-                // link(node_id, v, lvl, alpha);
+            for (int v : candidates) {
+                // std::cout << "connecting " << node_id << " to " << v << " at level " << lvl << std::endl;
+                // nodes_[node_id].neighbors[lvl].insert(v);
+                // nodes_[v].neighbors[lvl].insert(node_id);
+                // auto it_dst = nodes_[v].neighbors.find(lvl);
+                // auto nbrs_dst = it_dst->second;
+                // std::vector<int> candiates_dst;
+                // candiates_dst.reserve(nbrs_dst.size());
+                // for (int nbr : nbrs_dst) candiates_dst.push_back(nbr);
+
+                // std::vector<int> pruned_dst = prune_alpha_rng(v, candiates_dst, alpha);
+                // nodes_[v].neighbors[lvl] = std::unordered_set<int>(pruned_dst.begin(), pruned_dst.end());
+                link(node_id, v, lvl, alpha);
                 // nodes_[node_id].neighbors[lvl].insert(v);
                 // nodes_[v].neighbors[lvl].insert(node_id);
             }
@@ -1396,7 +1411,7 @@ class SimpleHNSW {
         // Choose neighbors (heuristic or simple)
         int cap = m_;
         // auto chosen = select_neighbors_heuristic(nodes_[u].vector, cand_ids, cap);
-        std::vector<int> pruned = prune_alpha_rng(u, cand_ids, alpha);
+        // std::vector<int> pruned = prune_alpha_rng(u, cand_ids, alpha);
         // if (chosen.empty()) {
         //     // fallback: simple top-m_
         //     chosen = select_neighbors_simple(nodes_[u].vector, cand_ids, cap);
@@ -1438,8 +1453,19 @@ class SimpleHNSW {
         // }
 
         // // Add edges (use link_new_node-like semantics so u stays connected)
-        for (int v : pruned) {
-            if (nodes_[v].deleted) continue;
+        for (int v : cand_ids) {
+            // if (nodes_[v].deleted) continue;
+            // nodes_[u].neighbors[level].insert(v);
+            // nodes_[v].neighbors[level].insert(u);
+            // auto it_dst = nodes_[v].neighbors.find(level);
+            // auto nbrs_dst = it_dst->second;
+            // std::vector<int> candiates_dst;
+            // candiates_dst.reserve(nbrs_dst.size());
+            // for (int nbr : nbrs_dst) candiates_dst.push_back(nbr);
+
+            // std::vector<int> pruned_dst = prune_alpha_rng(v, candiates_dst, alpha);
+            // nodes_[v].neighbors[level] = std::unordered_set<int>(pruned_dst.begin(), pruned_dst.end());
+            // std::cout << "Linking " << u << " and " << v << " at level " << level << std::endl;
             link(u, v, level, alpha);
         }
 
