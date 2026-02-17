@@ -76,9 +76,9 @@ class SimpleHNSW {
             auto [cand_set, _] = search_layer(vector, current, lvl, ef_construction_, false);
             std::vector<int> candidates;
             for (auto &p: cand_set) candidates.push_back(p.second);
-            auto neighbors = select_neighbors_heuristic(vector, candidates, m_);
-            for (int other_id : neighbors) {
-                link(node_id, other_id, lvl, 1);
+            // auto neighbors = select_neighbors_heuristic(vector, candidates, m_);
+            for (int other_id : candidates) {
+                link(node_id, other_id, lvl, 1.1);
             }
         }
     }
@@ -1207,7 +1207,8 @@ class SimpleHNSW {
     // Keeps up to m_ nodes.
     std::vector<int> prune_alpha_rng(int u,
                                     const std::vector<int>& candidates,
-                                    float alpha) {
+                                    float alpha,
+                                    int cap) {
         struct Item { float duv; int v; };
         std::vector<Item> sorted;
         sorted.reserve(candidates.size());
@@ -1242,7 +1243,7 @@ class SimpleHNSW {
             }
             if (keep) {
                 selected.push_back(cand.v);
-                if ((int)selected.size() >= m_) break;
+                if ((int)selected.size() >= cap) break;
             } else {
                 rejected.push_back(cand.v);
             }
@@ -1250,7 +1251,7 @@ class SimpleHNSW {
 
         // Pass 2: backfill to ensure degree ~ m_
         // (critical for recall stability under many deletions)
-        int remaining = m_ - (int)selected.size();
+        int remaining = cap - (int)selected.size();
         if(remaining == 0) return selected;
         for (int v: rejected) {
             selected.push_back(v);
@@ -1692,8 +1693,9 @@ class SimpleHNSW {
         // prune neighbors
         // prune_neighbors(src, level);
         // prune_neighbors(dst, level);
-        std::vector<int> pruned_src = prune_alpha_rng(src, candiates_src, alpha);
-        std::vector<int> pruned_dst = prune_alpha_rng(dst, candiates_dst, alpha);
+        int cap = (level == 0) ? 2 * m_ : m_;
+        std::vector<int> pruned_src = prune_alpha_rng(src, candiates_src, alpha, cap);
+        std::vector<int> pruned_dst = prune_alpha_rng(dst, candiates_dst, alpha, cap);
         nodes_[src].neighbors[level] = std::unordered_set<int>(pruned_src.begin(), pruned_src.end());
         nodes_[dst].neighbors[level] = std::unordered_set<int>(pruned_dst.begin(), pruned_dst.end());
     }
@@ -3845,7 +3847,7 @@ void test_sequential_deletion_degradation() {
 
     // --------- Initialize three indexes ---------
     // SimpleHNSW hnsw_tomb(D, 16, 0.5f, 400, 42);
-    SimpleHNSW hnsw_lr(D, 16, 0.5f, 400, 42);
+    SimpleHNSW hnsw_lr(D, 16, 0.25f, 400, 42);
     // SimpleHNSW hnsw_mnru(D, 16, 0.5f, 400, 42);
 
     std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
