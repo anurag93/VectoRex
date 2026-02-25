@@ -81,6 +81,10 @@ class SimpleHNSW {
             for (int other_id : candidates) {
                 link(node_id, other_id, lvl, 1.1);
             }
+
+            if (!cand_set.empty()) {
+                current = cand_set[0].second;  // closest node at this level
+            }
         }
     }
 
@@ -1370,19 +1374,19 @@ class SimpleHNSW {
             rebuild_node_neighbors_from_candidates(node_id, level, cands, alpha);
 
             // 2) optionally rebuild some neighbors as well (hnswlib does this)
-            // auto it = nodes_[node_id].neighbors.find(level);
-            // if (it == nodes_[node_id].neighbors.end()) continue;
+            auto it = nodes_[node_id].neighbors.find(level);
+            if (it == nodes_[node_id].neighbors.end()) continue;
 
-            // std::vector<int> one_hop(it->second.begin(), it->second.end());
-            // for (int n : one_hop) {
-            //     if (nodes_[n].deleted) continue;
-            //     if (nodes_[n].level < level) continue;
+            std::vector<int> one_hop(it->second.begin(), it->second.end());
+            for (int n : one_hop) {
+                if (nodes_[n].deleted) continue;
+                if (nodes_[n].level < level) continue;
 
-            //     if (uni(rng_) <= updateNeighborProbability) {
-            //         auto cands_n = collect_two_hop_candidates(n, level);
-            //         rebuild_node_neighbors_from_candidates(n, level, cands_n, alpha);
-            //     }
-            // }
+                if (uni(rng_) <= updateNeighborProbability) {
+                    auto cands_n = collect_two_hop_candidates(n, level);
+                    rebuild_node_neighbors_from_candidates(n, level, cands_n, alpha);
+                }
+            }
         }
         repair_connections_for_update(node_id, alpha);
     }
