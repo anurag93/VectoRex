@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <fstream>
+#include <filesystem>
 // #include <omp.h>
 
 struct HNSWNode {
@@ -1179,6 +1181,19 @@ class SimpleHNSW {
         }
     }
     
+    // Serialization methods
+    void save_to_disk(const std::string& filename) const;
+    bool load_from_disk(const std::string& filename);
+    void save_index_metadata(std::ofstream& ofs) const;
+    bool load_index_metadata(std::ifstream& ifs);
+    void save_nodes(std::ofstream& ofs) const;
+    bool load_nodes(std::ifstream& ifs);
+    
+    // Helper for serialization
+    static void write_string(std::ofstream& ofs, const std::string& str);
+    static std::string read_string(std::ifstream& ifs);
+    static void write_vector(std::ofstream& ofs, const std::vector<float>& vec);
+    static std::vector<float> read_vector(std::ifstream& ifs);
 
   private:
     int dim_;
@@ -1192,6 +1207,14 @@ class SimpleHNSW {
     int max_level_{-1};
     bool allow_replace_deleted_{true};
     std::vector<int> deleted_pool_;
+    
+    // Serialization helpers
+    void serialize_node(std::ofstream& ofs, const HNSWNode& node) const;
+    bool deserialize_node(std::ifstream& ifs, HNSWNode& node);
+    void serialize_neighbors(std::ofstream& ofs, 
+                           const std::unordered_map<int, std::unordered_set<int>>& neighbors) const;
+    bool deserialize_neighbors(std::ifstream& ifs, 
+                             std::unordered_map<int, std::unordered_set<int>>& neighbors);
 
     float distance(const std::vector<float> &a,
                    const std::vector<float> &b) const {
@@ -2342,6 +2365,71 @@ class SimpleHNSW {
 void test_top_layer_deletion();
 void test_sequential_deletion_degradation();
 
+// Index Builder Module
+SimpleHNSW build_or_load_index(const std::string& index_file, 
+                               const std::vector<std::vector<float>>& vectors,
+                               const std::vector<std::string>& labels,
+                               int dim, int m, float level_prob, int ef_construction, int seed);
+
+// Update/Testing Module  
+void run_update_tests(SimpleHNSW& hnsw_idx,
+                    const std::vector<std::vector<float>>& vectors,
+                    const std::vector<std::string>& labels,
+                    const std::vector<std::vector<float>>& query_vectors,
+                    const std::vector<std::vector<int>>& gt_neighbors,
+                    const std::vector<int>& milestones,
+                    const std::vector<int>& indices,
+                    int N, int K, int EF, int Q);
+
+// ==================== INDEX BUILDER MODULE ====================
+
+SimpleHNSW build_or_load_index(const std::string& index_file, 
+                               const std::vector<std::vector<float>>& vectors,
+                               const std::vector<std::string>& labels,
+                               int dim, int m, float level_prob, int ef_construction, int seed) {
+    
+    SimpleHNSW hnsw_idx(dim, m, level_prob, ef_construction, seed);
+    
+    // Try to load existing index, or build if not exists
+    if (std::filesystem::exists(index_file)) {
+        std::cout << "Loading existing index from disk...\n";
+        if (!hnsw_idx.load_from_disk(index_file)) {
+            std::cout << "Failed to load index, building new one...\n";
+            
+            std::cout << "\n[Building " << vectors.size() << " vectors into index...]\n";
+            for (int i = 0; i < (int)vectors.size(); ++i) {
+                hnsw_idx.insert(labels[i], vectors[i]);
+                if (i % 10000 == 0) {
+                    std::cout << "Inserted vector " << i << " into index\n";
+                }
+            }
+            
+            // Save after building
+            hnsw_idx.save_to_disk(index_file);
+        }
+    } else {
+        std::cout << "Building new index...\n";
+        std::cout << "\n[Building " << vectors.size() << " vectors into index...]\n";
+        for (int i = 0; i < vectors.size(); ++i) {
+            hnsw_idx.insert(labels[i], vectors[i]);
+            if (i % 10000 == 0) {
+                std::cout << "Inserted vector " << i << " into index\n";
+            }
+        }
+        
+        // Save after building
+        hnsw_idx.save_to_disk(index_file);
+    }
+    
+    // Debug connectivity after building
+    std::cout << "Debugging connectivity of index...\n";
+    hnsw_idx.debug_connectivity();
+    std::cout << "Debugging degree of index...\n";
+    hnsw_idx.debug_degree_hist_level0();
+    
+    return hnsw_idx;
+}
+
 std::vector<std::vector<float>> generate_gaussian_clusters(
     int N, int D, int clusters = 50, float cluster_spread = 0.1f, float separation = 1.5f)
 {
@@ -2484,6 +2572,7 @@ std::vector<std::vector<int>> load_ivecs(const std::string &filename) {
 
 
 int main() {
+    std::cout << "HNSW demo starting...\n" << std::flush;
     // Start total execution timer
     auto program_start = std::chrono::steady_clock::now();
     
@@ -3768,21 +3857,18 @@ void test_sequential_deletion_degradation() {
     std::cout << "\n" << std::string(70, '=')
               << "\nTEST: Sequential Deletion Degradation Analysis (SIFT)"
               << "\n" << std::string(70, '=') << "\n";
-    // omp_set_num_threads(8);
+    
     // ------------------ LOAD SIFT DATASET ------------------
-    auto base_vectors   = load_fvecs("./sift/sift_base.fvecs");
-    auto query_vectors  = load_fvecs("./sift/sift_query.fvecs");
-    auto gt_neighbors   = load_ivecs("./sift/sift_groundtruth.ivecs");
+    auto base_vectors   = load_fvecs("./gist/gist_base.fvecs");
+    auto query_vectors  = load_fvecs("./gist/gist_query.fvecs");
+    auto gt_neighbors   = load_ivecs("./gist/gist_groundtruth.ivecs");
 
     if (base_vectors.empty() || query_vectors.empty() || gt_neighbors.empty()) {
         throw std::runtime_error("SIFT 1M dataset files could not be loaded correctly.");
     }
 
-    std::unordered_map<std::string, std:: string> updated_labels;
-
     int total_N = static_cast<int>(base_vectors.size());
     int D       = static_cast<int>(base_vectors[0].size());
-    static const std::unordered_set<int> checkpoints = {10, 100, 1000, 5000, 10000, 100000, 500000};
 
     // Cap N for speed (you can change this)
     const int MAX_N = 100000;
@@ -3793,25 +3879,11 @@ void test_sequential_deletion_degradation() {
     const int EF = 400;   // efSearch
 
     // Number of queries to average over
-    const int Q = query_vectors.size();    // you can increase to 100, etc.
+    const int Q = query_vectors.size();
     if (static_cast<int>(query_vectors.size()) < Q ||
         static_cast<int>(gt_neighbors.size())   < Q) {
         throw std::runtime_error("Not enough queries / ground-truth entries in SIFT files.");
     }
-
-    // std::vector<std::vector<float>> query_vectors;
-
-    // for (int i = 0; i < sift_queries.size() && query_vectors.size() < Q; i++) {
-    //     bool ok = true;
-    //     for (int k = 0; k < K; k++) {
-    //         int nn_index = gt_neighbors[i][k];
-    //         if (nn_index >= N) {
-    //             ok = false;
-    //             break;
-    //         }
-    //     }
-    //     if (ok) query_vectors.push_back(sift_queries[i]);
-    // }
 
     std::cout << "Loaded SIFT base: "   << total_N  << " vectors (using N=" << N << ")\n";
     std::cout << "Loaded SIFT queries: " << query_vectors.size()
@@ -3829,8 +3901,7 @@ void test_sequential_deletion_degradation() {
         labels.push_back("vec_" + std::to_string(i));
     }
 
-    // Deletion milestones (cumulative)
-    // std::vector<int> milestones = {10, 100, 1000, 10000, 50000, 100000, 200000, 500000};
+    // Update milestones (cumulative)
     std::vector<int> milestones = {10, 100, 1000, 10000};
     // Sanity: ensure they don't exceed N
     milestones.erase(
@@ -3840,94 +3911,330 @@ void test_sequential_deletion_degradation() {
     );
 
     if (milestones.empty()) {
-        std::cout << "No valid deletion milestones (all >= N). Exiting test.\n";
+        std::cout << "No valid update milestones (all >= N). Exiting test.\n";
         return;
     }
 
-    // --------- Generate permutation of delete order ---------
+    // --------- Generate permutation of update order ---------
     std::mt19937 rng(42);
     std::vector<int> indices(N);
     std::iota(indices.begin(), indices.end(), 0);
     std::shuffle(indices.begin(), indices.end(), rng);
 
-    // --------- Initialize three indexes ---------
-    SimpleHNSW hnsw_tomb(D, 16, 0.25f, 400, 42);
-    // SimpleHNSW hnsw_lr(D, 32, 0.25f, 600, 42);
-    // SimpleHNSW hnsw_mnru(D, 16, 0.25f, 400, 42);
+    // ==================== MODULAR APPROACH ====================
+    
+    // 1. Build or load index using Index Builder Module
+    const std::string index_file = "hnsw_index_gist_100k.bin";
+    SimpleHNSW hnsw_idx = build_or_load_index(index_file, vectors, labels, D, 16, 0.25f, 400, 42);
+    
+    // 2. Run update tests using Update/Testing Module
+    // run_update_tests(hnsw_idx, vectors, labels, query_vectors, gt_neighbors, 
+    //                milestones, indices, N, K, EF, Q);
+}
 
-    std::cout << "\n[Inserting " << N << " vectors into all indexes...]\n";
-    // const int CHUNK_SIZE = 5000;  // Fits in 8GB
-    // for (int chunk_start = 0; chunk_start < N; chunk_start += CHUNK_SIZE) {
-    // 	int chunk_end = std::min(chunk_start + CHUNK_SIZE, N);
-    // 	auto chunk_vecs = std::vector<std::vector<float>>(
-    //     base_vectors.begin() + chunk_start,
-    //     base_vectors.begin() + chunk_end);
-    // 	#pragma omp parallel for schedule(dynamic)
-    // 	for (int i = chunk_start; i < chunk_end; ++i) {
-    //     	// hnsw_tomb.insert(labels[i], vectors[i]);
-    //     	hnsw_lr.insert(labels[i], chunk_vecs[i-chunk_start]);
-    //     	// hnsw_mnru.insert(labels[i], vectors[i]);
-    //     	if (checkpoints.count(i)) {
-    //         		#pragma omp critical
-    //         		std::cout << "Inserted vector " << i << " into all indexes\n";
-    //     	}
-    // 	}
-    //  }
-    for (int i = 0; i < N; ++i) {
-         hnsw_tomb.insert(labels[i], vectors[i]);
-        //  hnsw_lr.insert(labels[i], vectors[i]);
-         // hnsw_mnru.insert(labels[i], vectors[i]);
-         if (checkpoints.count(i)) {
-            std::cout << "Inserted vector " << i << " into all indexes\n";
+// ==================== SERIALIZATION IMPLEMENTATIONS ====================
+
+void SimpleHNSW::save_to_disk(const std::string& filename) const {
+    std::ofstream ofs(filename, std::ios::binary);
+    if (!ofs) throw std::runtime_error("Cannot open file for writing: " + filename);
+    
+    // Write magic number and version
+    const uint32_t magic = 0x484E5357; // "HNSW"
+    const uint32_t version = 1;
+    ofs.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    ofs.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    
+    // Save metadata
+    save_index_metadata(ofs);
+    
+    // Save nodes
+    save_nodes(ofs);
+    
+    ofs.close();
+    std::cout << "Index saved to " << filename << std::endl;
+}
+
+bool SimpleHNSW::load_from_disk(const std::string& filename) {
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs) {
+        std::cerr << "Cannot open file for reading: " << filename << std::endl;
+        return false;
+    }
+    
+    // Check magic number and version
+    uint32_t magic, version;
+    ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    ifs.read(reinterpret_cast<char*>(&version), sizeof(version));
+    
+    if (magic != 0x484E5357) {
+        std::cerr << "Invalid file format" << std::endl;
+        return false;
+    }
+    if (version != 1) {
+        std::cerr << "Unsupported version: " << version << std::endl;
+        return false;
+    }
+    
+    // Clear existing data
+    nodes_.clear();
+    label_to_id_.clear();
+    deleted_pool_.clear();
+    entry_point_.reset();
+    max_level_ = -1;
+    
+    // Load metadata
+    if (!load_index_metadata(ifs)) return false;
+    
+    // Load nodes
+    if (!load_nodes(ifs)) return false;
+    
+    ifs.close();
+    std::cout << "Index loaded from " << filename << std::endl;
+    return true;
+}
+
+void SimpleHNSW::save_index_metadata(std::ofstream& ofs) const {
+    // Save basic parameters
+    ofs.write(reinterpret_cast<const char*>(&dim_), sizeof(dim_));
+    ofs.write(reinterpret_cast<const char*>(&m_), sizeof(m_));
+    ofs.write(reinterpret_cast<const char*>(&level_probability_), sizeof(level_probability_));
+    ofs.write(reinterpret_cast<const char*>(&ef_construction_), sizeof(ef_construction_));
+    ofs.write(reinterpret_cast<const char*>(&max_level_), sizeof(max_level_));
+    ofs.write(reinterpret_cast<const char*>(&allow_replace_deleted_), sizeof(allow_replace_deleted_));
+    
+    // Save entry point
+    bool has_entry = entry_point_.has_value();
+    ofs.write(reinterpret_cast<const char*>(&has_entry), sizeof(has_entry));
+    if (has_entry) {
+        int entry_val = entry_point_.value();
+        ofs.write(reinterpret_cast<const char*>(&entry_val), sizeof(entry_val));
+    }
+    
+    // Save label_to_id map size
+    size_t map_size = label_to_id_.size();
+    ofs.write(reinterpret_cast<const char*>(&map_size), sizeof(map_size));
+    
+    // Save label_to_id map
+    for (const auto& [label, id] : label_to_id_) {
+        write_string(ofs, label);
+        ofs.write(reinterpret_cast<const char*>(&id), sizeof(id));
+    }
+    
+    // Save deleted pool
+    size_t pool_size = deleted_pool_.size();
+    ofs.write(reinterpret_cast<const char*>(&pool_size), sizeof(pool_size));
+    ofs.write(reinterpret_cast<const char*>(deleted_pool_.data()), pool_size * sizeof(int));
+}
+
+bool SimpleHNSW::load_index_metadata(std::ifstream& ifs) {
+    // Load basic parameters
+    ifs.read(reinterpret_cast<char*>(&dim_), sizeof(dim_));
+    ifs.read(reinterpret_cast<char*>(&m_), sizeof(m_));
+    ifs.read(reinterpret_cast<char*>(&level_probability_), sizeof(level_probability_));
+    ifs.read(reinterpret_cast<char*>(&ef_construction_), sizeof(ef_construction_));
+    ifs.read(reinterpret_cast<char*>(&max_level_), sizeof(max_level_));
+    ifs.read(reinterpret_cast<char*>(&allow_replace_deleted_), sizeof(allow_replace_deleted_));
+    
+    // Load entry point
+    bool has_entry;
+    ifs.read(reinterpret_cast<char*>(&has_entry), sizeof(has_entry));
+    if (has_entry) {
+        int entry_val;
+        ifs.read(reinterpret_cast<char*>(&entry_val), sizeof(entry_val));
+        entry_point_ = entry_val;
+    }
+    
+    // Load label_to_id map size
+    size_t map_size;
+    ifs.read(reinterpret_cast<char*>(&map_size), sizeof(map_size));
+    
+    // Load label_to_id map
+    for (size_t i = 0; i < map_size; ++i) {
+        std::string label = read_string(ifs);
+        int id;
+        ifs.read(reinterpret_cast<char*>(&id), sizeof(id));
+        label_to_id_[label] = id;
+    }
+    
+    // Load deleted pool
+    size_t pool_size;
+    ifs.read(reinterpret_cast<char*>(&pool_size), sizeof(pool_size));
+    deleted_pool_.resize(pool_size);
+    ifs.read(reinterpret_cast<char*>(deleted_pool_.data()), pool_size * sizeof(int));
+    
+    return true;
+}
+
+void SimpleHNSW::save_nodes(std::ofstream& ofs) const {
+    // Save number of nodes
+    size_t num_nodes = nodes_.size();
+    ofs.write(reinterpret_cast<const char*>(&num_nodes), sizeof(num_nodes));
+    
+    // Save each node
+    for (const auto& node : nodes_) {
+        serialize_node(ofs, node);
+    }
+}
+
+bool SimpleHNSW::load_nodes(std::ifstream& ifs) {
+    // Load number of nodes
+    size_t num_nodes;
+    ifs.read(reinterpret_cast<char*>(&num_nodes), sizeof(num_nodes));
+    
+    // Resize nodes vector
+    nodes_.resize(num_nodes);
+    
+    // Load each node
+    for (size_t i = 0; i < num_nodes; ++i) {
+        if (!deserialize_node(ifs, nodes_[i])) {
+            return false;
         }
     }
-    // hnsw_lr.force_connectivity_level0()
-    std::cout << "Debugging connectivity of Tombstone index...\n";
-    hnsw_tomb.debug_connectivity();
-    std::cout << "Debugging degree of Tombstone index...\n";
-    hnsw_tomb.debug_degree_hist_level0();
+    
+    return true;
+}
 
-    // -------- Results structure --------
-    // struct ResultRow {
-    //     int deletions;
-    //     double tomb_del, lr_del, mnru_del;
-    //     double tomb_srch, lr_srch, mnru_srch;
-    //     double tomb_recall, lr_recall, mnru_recall;
-    // };
+void SimpleHNSW::serialize_node(std::ofstream& ofs, const HNSWNode& node) const {
+    // Save label
+    write_string(ofs, node.label);
+    
+    // Save vector
+    write_vector(ofs, node.vector);
+    
+    // Save level
+    ofs.write(reinterpret_cast<const char*>(&node.level), sizeof(node.level));
+    
+    // Save deleted flag
+    ofs.write(reinterpret_cast<const char*>(&node.deleted), sizeof(node.deleted));
+    
+    // Save neighbors
+    serialize_neighbors(ofs, node.neighbors);
+}
 
+bool SimpleHNSW::deserialize_node(std::ifstream& ifs, HNSWNode& node) {
+    // Load label
+    node.label = read_string(ifs);
+    
+    // Load vector
+    node.vector = read_vector(ifs);
+    
+    // Load level
+    ifs.read(reinterpret_cast<char*>(&node.level), sizeof(node.level));
+    
+    // Load deleted flag
+    ifs.read(reinterpret_cast<char*>(&node.deleted), sizeof(node.deleted));
+    
+    // Load neighbors
+    return deserialize_neighbors(ifs, node.neighbors);
+}
+
+void SimpleHNSW::serialize_neighbors(std::ofstream& ofs, 
+                                    const std::unordered_map<int, std::unordered_set<int>>& neighbors) const {
+    // Save number of levels
+    size_t num_levels = neighbors.size();
+    ofs.write(reinterpret_cast<const char*>(&num_levels), sizeof(num_levels));
+    
+    // Save each level's neighbors
+    for (const auto& [level, neighbor_set] : neighbors) {
+        ofs.write(reinterpret_cast<const char*>(&level), sizeof(level));
+        
+        // Save number of neighbors at this level
+        size_t num_neighbors = neighbor_set.size();
+        ofs.write(reinterpret_cast<const char*>(&num_neighbors), sizeof(num_neighbors));
+        
+        // Save neighbor IDs
+        for (int neighbor_id : neighbor_set) {
+            ofs.write(reinterpret_cast<const char*>(&neighbor_id), sizeof(neighbor_id));
+        }
+    }
+}
+
+bool SimpleHNSW::deserialize_neighbors(std::ifstream& ifs, 
+                                      std::unordered_map<int, std::unordered_set<int>>& neighbors) {
+    // Load number of levels
+    size_t num_levels;
+    ifs.read(reinterpret_cast<char*>(&num_levels), sizeof(num_levels));
+    
+    neighbors.clear();
+    
+    for (size_t i = 0; i < num_levels; ++i) {
+        // Load level
+        int level;
+        ifs.read(reinterpret_cast<char*>(&level), sizeof(level));
+        
+        // Load number of neighbors
+        size_t num_neighbors;
+        ifs.read(reinterpret_cast<char*>(&num_neighbors), sizeof(num_neighbors));
+        
+        // Load neighbor IDs
+        std::unordered_set<int> neighbor_set;
+        for (size_t j = 0; j < num_neighbors; ++j) {
+            int neighbor_id;
+            ifs.read(reinterpret_cast<char*>(&neighbor_id), sizeof(neighbor_id));
+            neighbor_set.insert(neighbor_id);
+        }
+        
+        neighbors[level] = std::move(neighbor_set);
+    }
+    
+    return true;
+}
+
+// Helper methods for basic types
+void SimpleHNSW::write_string(std::ofstream& ofs, const std::string& str) {
+    size_t length = str.length();
+    ofs.write(reinterpret_cast<const char*>(&length), sizeof(length));
+    ofs.write(str.c_str(), length);
+}
+
+std::string SimpleHNSW::read_string(std::ifstream& ifs) {
+    size_t length;
+    ifs.read(reinterpret_cast<char*>(&length), sizeof(length));
+    
+    std::string str(length, '\0');
+    ifs.read(&str[0], length);
+    return str;
+}
+
+void SimpleHNSW::write_vector(std::ofstream& ofs, const std::vector<float>& vec) {
+    size_t size = vec.size();
+    ofs.write(reinterpret_cast<const char*>(&size), sizeof(size));
+    ofs.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(float));
+}
+
+std::vector<float> SimpleHNSW::read_vector(std::ifstream& ifs) {
+    size_t size;
+    ifs.read(reinterpret_cast<char*>(&size), sizeof(size));
+    
+    std::vector<float> vec(size);
+    ifs.read(reinterpret_cast<char*>(vec.data()), size * sizeof(float));
+    return vec;
+}
+
+// ==================== UPDATE/TESTING MODULE ====================
+
+void run_update_tests(SimpleHNSW& hnsw_idx,
+                    const std::vector<std::vector<float>>& vectors,
+                    const std::vector<std::string>& labels,
+                    const std::vector<std::vector<float>>& query_vectors,
+                    const std::vector<std::vector<int>>& gt_neighbors,
+                    const std::vector<int>& milestones,
+                    const std::vector<int>& indices,
+                    int N, int K, int EF, int Q) {
+    
+    std::unordered_map<std::string, std::string> updated_labels;
+    
+    // Results structure
     struct ResultRow {
         int deletions;
-        // double tomb_del;
-        // double tomb_srch_del;
-        // double tomb_recall_del;
-        double tomb_update;
-        double tomb_srch_update;
-        double tomb_recall_update;
+        double lr_update; 
+        double lr_srch_update;
+        double lr_recall_update;
     };
-
-    // struct ResultRow {
-    //     int deletions;
-    //     // double lr_del;
-    //     // double lr_srch_del;
-    //     // double lr_recall_del;
-    //     double lr_update; 
-    //     double lr_srch_update;
-    //     double lr_recall_update;
-    // };
-
-    // struct ResultRow {
-    //     int deletions;
-    //     // double mnru_del;
-    //     // double mnru_srch;
-    //     // double mnru_recall;
-    //     double mnru_update;
-    //     double mnru_srch_update;
-    //     double mnru_recall_update;
-    // };
-
+    
     std::vector<ResultRow> table;
     int current_del = 0;
-
+    
     // Helper: run search for a single query and measure time
     auto measure_search_query = [&](SimpleHNSW &idx,
                                     const std::vector<float> &q) {
@@ -3937,136 +4244,42 @@ void test_sequential_deletion_degradation() {
         double ms  = std::chrono::duration<double, std::milli>(end - start).count();
         return std::make_pair(res, ms);
     };
-
+    
     // -----------------------------------------------------
     //                MAIN LOOP OVER MILESTONES
     // -----------------------------------------------------
     for (int target_del : milestones) {
         int del_count = target_del - current_del;
-
+        
         std::cout << "\n" << std::string(70, '-')
-                  << "\nDeleting " << del_count << " nodes (cumulative: "
+                  << "\nUpdating " << del_count << " nodes (cumulative: "
                   << target_del << ")\n"
                   << std::string(70, '-') << "\n";
-
-        // double tomb_del_ms = 0.0;
-        double tomb_update_ms = 0.0;
-        // double tomb_srch_ms_delete = 0.0;
-        // double tomb_recall_delete = 0.0;
-
-        // double lr_del_ms = 0.0;
-        // double lr_update_ms = 0.0;
-        // double lr_srch_delete = 0.0;
-        // double lr_recall_delete = 0.0;
-
-
-        // double mnru_del_ms = 0.0;
-        // double mnru_update_ms = 0.0;
-        // double mnru_srch_ms_delete = 0.0;
-        // double mnru_recall_delete = 0.0;
-
-        // --------- Perform deletions on all 3 indexes ---------
-        // for (int i = current_del; i < target_del; ++i) {
-        //     const std::string &lbl = labels[indices[i]];
-
-        //     // Tombstone
-        //     // auto start = std::chrono::steady_clock::now();
-        //     // hnsw_tomb.delete_node(lbl);
-        //     // auto end   = std::chrono::steady_clock::now();
-        //     // tomb_del_ms += std::chrono::duration<double, std::milli>(end - start).count();
-
-        //     // Local Rewiring
-        //     // auto start = std::chrono::steady_clock::now();
-        //     // hnsw_lr.delete_with_local_rewiring(lbl);
-        //     // auto end   = std::chrono::steady_clock::now();
-        //     // lr_del_ms += std::chrono::duration<double, std::milli>(end - start).count();
-
-        //     // MNRU
-        //     // auto start = std::chrono::steady_clock::now();
-        //     // hnsw_mnru.delete_with_MNRU(lbl, 1);
-        //     // auto end   = std::chrono::steady_clock::now(); 
-        //     // mnru_del_ms += std::chrono::duration<double, std::milli>(end - start).count();
-        // }
-        // std::cout << "Debugging connectivity of Tombstone index after deletion...\n, target_del: " << target_del << "\n";
-        // hnsw_mnru.debug_connectivity();
-        // std::cout << "Debugging degree of Tombstone index after deletion...\n, target_del: " << target_del << "\n";
-        // hnsw_mnru.debug_degree_hist_level0();
-
-        // for (int qi = 0; qi < Q; ++qi) {
-        //     const auto &qvec        = query_vectors[qi];
-        //     const auto &gt_row       = gt_neighbors[qi];  // sorted by true distance
-
-        //     // ---- Build ground truth set for this query (top-K, clipped to N) ----
-        //     std::unordered_set<int> gt_set;
-        //     int taken = 0;
-        //     for (int id : gt_row) {
-        //         if (id < N) {
-        //             gt_set.insert(id);
-        //             if (++taken >= K) break;
-        //         }
-        //     }
-
-        //     auto compute_recall = [&](const std::vector<SimpleHNSW::SearchResult> &results) {
-        //         int hits = 0;
-        //         for (int i = 0; i < K && i < (int)results.size(); ++i) {
-        //             // label is "vec_<id>"
-        //             std::string label = results[i].label;
-        //             auto it = updated_labels.find(label);
-        //             const std::string &canonical_lbl =
-        //                     (it != updated_labels.end()) ? it->second : label;
-        //             std::string label_id = canonical_lbl.substr(4);
-        //             int id = stoi(label_id);
-        //             if (gt_set.count(id)) ++hits;
-        //         }
-        //         return static_cast<double>(hits) / K;
-        //     };
-
-        //     // ---- Search all 3 indexes ----
-        //     // auto [tomb_res, tomb_ms]  = measure_search_query(hnsw_tomb, qvec);
-        //     // auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
-        //     auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
-
-        //     // lr_srch_delete += lr_ms;
-        //     // tomb_srch_ms_delete   += tomb_ms;
-        //     mnru_srch_ms_delete += mnru_ms;
-
-        //     // lr_recall_delete += compute_recall(lr_res);
-        //     // tomb_recall_delete   += compute_recall(tomb_res);
-        //     mnru_recall_delete += compute_recall(mnru_res);
-        // }
-
-
+        
+        double lr_update_ms = 0.0;
+        
+        // --------- Perform updates on index ---------
         for (int i = current_del; i < target_del; ++i) {
             const std::string lbl = labels[indices[i]];
-            // const std::string lbl_updated = lbl + "_updated";
-            // updated_labels[lbl_updated] = lbl; 
             auto start = std::chrono::steady_clock::now();
-            // hnsw_lr.delete_with_local_rewiring(lbl, vectors[indices[i]]);
-            // hnsw_tomb.insert(lbl_updated, vectors[indices[i]]);
-            hnsw_tomb.insert_replace_deleted(lbl, vectors[indices[i]]);
-            // hnsw_mnru.delete_with_MNRU(lbl, vectors[indices[i]], 1.1);
+            hnsw_idx.delete_with_local_rewiring(lbl, vectors[indices[i]]);
             auto end   = std::chrono::steady_clock::now();
-            tomb_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            // mnru_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
-            // lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            lr_update_ms += std::chrono::duration<double, std::milli>(end - start).count();
         }
-        std::cout << "Debugging connectivity of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_tomb.debug_connectivity();
-        std::cout << "Debugging degree of Tombstone index after update...\n, target_del: " << target_del << "\n";
-        hnsw_tomb.debug_degree_hist_level0();
-
+        
+        std::cout << "Debugging connectivity of index after update...\n, target_del: " << target_del << "\n";
+        hnsw_idx.debug_connectivity();
+        std::cout << "Debugging degree of index after update...\n, target_del: " << target_del << "\n";
+        hnsw_idx.debug_degree_hist_level0();
+        
         // --------- EVALUATION OVER Q QUERIES ---------
-        double tomb_srch_sum_update   = 0.0;
-        // double lr_srch_update     = 0.0;
-        // double mnru_srch_update   = 0.0;
-        double tomb_recall_sum_update = 0.0;
-        // double lr_recall_update   = 0.0;
-        // double mnru_recall_update = 0.0;
-
+        double lr_srch_update     = 0.0;
+        double lr_recall_update   = 0.0;
+        
         for (int qi = 0; qi < Q; ++qi) {
             const auto &qvec        = query_vectors[qi];
             const auto &gt_row       = gt_neighbors[qi];  // sorted by true distance
-
+            
             // ---- Build ground truth set for this query (top-K, clipped to N) ----
             std::unordered_set<int> gt_set;
             int taken = 0;
@@ -4076,7 +4289,7 @@ void test_sequential_deletion_degradation() {
                     if (++taken >= K) break;
                 }
             }
-
+            
             auto compute_recall = [&](const std::vector<SimpleHNSW::SearchResult> &results) {
                 int hits = 0;
                 for (int i = 0; i < K && i < (int)results.size(); ++i) {
@@ -4091,143 +4304,51 @@ void test_sequential_deletion_degradation() {
                 }
                 return static_cast<double>(hits) / K;
             };
-
-            // ---- Search all 3 indexes ----
-            auto [tomb_res, tomb_ms]  = measure_search_query(hnsw_tomb, qvec);
-            // auto [lr_res,   lr_ms]    = measure_search_query(hnsw_lr,   qvec);
-            // auto [mnru_res, mnru_ms]  = measure_search_query(hnsw_mnru, qvec);
-
-            // lr_srch_update += lr_ms;
-            tomb_srch_sum_update   += tomb_ms;
-            // mnru_srch_update += mnru_ms; 
-
-            // lr_recall_update += compute_recall(lr_res);
-            tomb_recall_sum_update   += compute_recall(tomb_res);
-            // mnru_recall_update += compute_recall(mnru_res);
+            
+            // ---- Search index ----
+            auto [lr_res,   lr_ms]    = measure_search_query(hnsw_idx,   qvec);
+            
+            lr_srch_update += lr_ms;
+            lr_recall_update += compute_recall(lr_res);
         }
-
-        // Averages over Q queries
-        // double tomb_srch_avg_delete  = tomb_srch_ms_delete   / Q;
-        // double tomb_recall_avg_delete = tomb_recall_delete / Q;
-        double tomb_srch_avg_update = tomb_srch_sum_update / Q;
-        double tomb_recall_avg_update = tomb_recall_sum_update / Q;
-
-
-        // double lr_srch_avg_delete  = lr_srch_delete   / Q;
-        // double lr_recall_avg_delete = lr_recall_delete / Q;
-        // double lr_srch_avg_update = lr_srch_update / Q;
-        // double lr_recall_avg_update = lr_recall_update / Q;
-
-
-        // double mnru_srch_avg_delete  = mnru_srch_ms_delete   / Q;
-        // double mnru_recall_avg_delete = mnru_recall_delete / Q;
-        // double mnru_srch_avg_update = mnru_srch_update / Q;
-        // double mnru_recall_avg_update = mnru_recall_update / Q;
-
-
-        // double lr_srch_avg     = lr_srch_sum     / Q; 
-        // double mnru_srch_avg   = mnru_srch_sum   / Q; 
-        // double tomb_recall_avg = tomb_recall_sum / Q;
-        // double mnru_recall_avg   = mnru_recall_sum   / Q;
-        // double lr_recall_avg = lr_recall_sum     / Q; 
-
         
-        // table.push_back({
-        //     target_del,
-        //     mnru_del_ms,
-        //     mnru_srch_avg,
-        //     mnru_recall_avg,
-        //     mnru_update_ms
-        // });
- 
+        // Averages over Q queries
+        double lr_srch_avg_update = lr_srch_update / Q;
+        double lr_recall_avg_update = lr_recall_update / Q;
+        
+        // Store result row
         table.push_back({
             target_del,
-            // tomb_del_ms,
-            // tomb_srch_avg_delete,
-            // tomb_recall_avg_delete,
-            tomb_update_ms,
-            tomb_srch_avg_update,
-            tomb_recall_avg_update
+            lr_update_ms,
+            lr_srch_avg_update,
+            lr_recall_avg_update
         });
-
-        // table.push_back({
-        //     target_del,
-        //     // lr_del_ms,
-        //     // lr_srch_avg_delete,
-        //     // lr_recall_avg_delete,
-        //     lr_update_ms,
-        //     lr_srch_avg_update,
-        //     lr_recall_avg_update
-        // });
-
-        // table.push_back({
-        //     target_del,
-        //     // mnru_del_ms,
-        //     // mnru_srch_avg_delete,
-        //     // mnru_recall_avg_delete,
-        //     mnru_update_ms,
-        //     mnru_srch_avg_update,
-        //     mnru_recall_avg_update
-        // });
         
         current_del = target_del;
     }
-
+    
     // -----------------------------------------------------
     //                PRINT SUMMARY TABLE
     // -----------------------------------------------------
     std::cout << "\n" << std::string(70, '=')
-              << "\nSEQUENTIAL DELETION SUMMARY"
+              << "\nSEQUENTIAL UPDATE SUMMARY"
               << "\n" << std::string(70, '=') << "\n";
-
-    std::cout << std::setw(20) << "Number of deletes"
-            //   << std::setw(42) << "Total tombstone delete time in ms"
-            //   << std::setw(20) << "Tombstone D"
-            //   << std::setw(20) << "LR_RN D"
-            //   << std::setw(20) << "MNRU D"
-            //   << std::setw(42) << "Tombstone search average time in ms (post deletion)"
-            //   << std::setw(20) << "Tombstone S_D"
-            //   << std::setw(20) << "LR_RN S_D"
-            //   << std::setw(20) << "MNRU S_D"
-            //   << std::setw(42) << "Tombstone recall average (post deletion)"
-            //   << std::setw(20) << "LR_RN R_D"
-            //   << std::setw(20) << "Tombstone R_D"
-            //   << std::setw(20) << "MNRU R_D"
-              << std::setw(20) << "Tombstone U"
-              << std::setw(20) << "Tombstone S_U"
-              << std::setw(20) << "Tombstone R_U"
-            //   << std::setw(20) << "LR_RN U"
-            //   << std::setw(20) << "LR_RN S_U"
-            //   << std::setw(20) << "LR_RN R_U"
-            //   << std::setw(20) << "MNRU U"
-            //   << std::setw(20) << "MNRU S_U"
-            //   << std::setw(20) << "MNRU R_U"
+    
+    std::cout << std::setw(20) << "Number of updates"
+              << std::setw(20) << "LR_RN U"
+              << std::setw(20) << "LR_RN S_U"
+              << std::setw(20) << "LR_RN R_U"
               << "\n";
-
+    
     for (const auto &r : table) {
         std::cout << std::setw(20) << r.deletions
-                //   << std::setw(20) << r.tomb_del
-                //   << std::setw(20) << r.mnru_del  
-                //   << std::setw(20) << r.lr_del
-                //   << std::setw(20) << r.tomb_srch_del
-                //   << std::setw(20) << r.mnru_srch
-                //   << std::setw(20) << r.lr_srch_del
-                //   << std::setw(20) << r.tomb_recall_del
-                //   << std::setw(20) << r.mnru_recall
-                //   << std::setw(20) << r.lr_recall_del
-                  << std::setw(20) << r.tomb_update
-                //   << std::setw(20) << r.mnru_update
-                //   << std::setw(20) << r.lr_update
-                  << std::setw(20) << r.tomb_srch_update
-                  << std::setw(20) << r.tomb_recall_update
-                //   << std::setw(20) << r.lr_srch_update
-                //   << std::setw(20) << r.lr_recall_update
-                //   << std::setw(20) << r.mnru_srch_update
-                //   << std::setw(20) << r.mnru_recall_update
+                  << std::setw(20) << r.lr_update
+                  << std::setw(20) << r.lr_srch_update
+                  << std::setw(20) << r.lr_recall_update
                   << "\n";
     }
-
-    std::cout << "\n[Done]\n";
+    
+    std::cout << "\n[Update testing complete]\n";
 }
 
 
