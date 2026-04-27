@@ -14,6 +14,9 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <getopt.h>
+#include <sstream>
+#include <numeric>
 // #include <omp.h>
 
 struct HNSWNode {
@@ -28,6 +31,114 @@ enum class RUVariant {
     LR_RN,  // Local Rewiring - Representative Neighbor (your algorithm)
     MNRU    // Multi-Neighbor Replace Update (paper-style)
 };
+
+struct Config {
+    std::string dataset_path = "./amazon";
+    std::string index_file = "hnsw_index.bin";
+    int dimension = 384;
+    int m = 16;
+    float level_probability = 0.25f;
+    int ef_construction = 200;
+    int ef_search = 100;
+    int k = 10;
+    uint64_t seed = 42;
+    bool rebuild_index = false;
+    std::vector<int> milestones = {1000, 5000, 10000, 20000, 30000};
+};
+
+void print_usage(const char* program_name) {
+    std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
+              << "HNSW Demo with Local Rewiring Support\n\n"
+              << "Options:\n"
+              << "  -d, --dataset PATH       Dataset directory path (default: ./amazon)\n"
+              << "  -i, --index FILE         Index file path (default: hnsw_index.bin)\n"
+              << "  --dimension DIM          Vector dimension (default: 384)\n"
+              << "  -m, --max-connections M  Max connections per node (default: 16)\n"
+              << "  --level-probability P    Level probability (default: 0.25)\n"
+              << "  --ef-construction EF     EF during construction (default: 200)\n"
+              << "  --ef-search EF           EF during search (default: 100)\n"
+              << "  -k, --top-k K            Number of nearest neighbors (default: 10)\n"
+              << "  --seed SEED              Random seed (default: 42)\n"
+              << "  --rebuild                Force index rebuild\n"
+              << "  --milestones M1,M2,...   Deletion milestones (default: 1000,5000,10000,20000,30000)\n"
+              << "  -h, --help               Show this help message\n";
+}
+
+Config parse_args(int argc, char* argv[]) {
+    Config config;
+    static struct option long_options[] = {
+        {"dataset", required_argument, 0, 'd'},
+        {"index", required_argument, 0, 'i'},
+        {"dimension", required_argument, 0, 1001},
+        {"max-connections", required_argument, 0, 'm'},
+        {"level-probability", required_argument, 0, 1002},
+        {"ef-construction", required_argument, 0, 1003},
+        {"ef-search", required_argument, 0, 1004},
+        {"top-k", required_argument, 0, 'k'},
+        {"seed", required_argument, 0, 1005},
+        {"rebuild", no_argument, 0, 1006},
+        {"milestones", required_argument, 0, 1007},
+        {"help", no_argument, 0, 'h'},
+        {0, 0, 0, 0}
+    };
+
+    int option_index = 0;
+    int c;
+
+    while ((c = getopt_long(argc, argv, "d:i:m:k:h", long_options, &option_index)) != -1) {
+        switch (c) {
+            case 'd':
+                config.dataset_path = optarg;
+                break;
+            case 'i':
+                config.index_file = optarg;
+                break;
+            case 'm':
+                config.m = std::stoi(optarg);
+                break;
+            case 'k':
+                config.k = std::stoi(optarg);
+                break;
+            case 1001:
+                config.dimension = std::stoi(optarg);
+                break;
+            case 1002:
+                config.level_probability = std::stof(optarg);
+                break;
+            case 1003:
+                config.ef_construction = std::stoi(optarg);
+                break;
+            case 1004:
+                config.ef_search = std::stoi(optarg);
+                break;
+            case 1005:
+                config.seed = std::stoull(optarg);
+                break;
+            case 1006:
+                config.rebuild_index = true;
+                break;
+            case 1007: {
+                std::stringstream ss(optarg);
+                std::string item;
+                config.milestones.clear();
+                while (std::getline(ss, item, ',')) {
+                    config.milestones.push_back(std::stoi(item));
+                }
+                break;
+            }
+            case 'h':
+                print_usage(argv[0]);
+                exit(0);
+            case '?':
+                print_usage(argv[0]);
+                exit(1);
+            default:
+                break;
+        }
+    }
+
+    return config;
+}
 
 class SimpleHNSW {
   public:
@@ -81,7 +192,7 @@ class SimpleHNSW {
             for (auto &p: cand_set) candidates.push_back(p.second);
             // auto neighbors = select_neighbors_heuristic(vector, candidates, m_);
             for (int other_id : candidates) {
-                link(node_id, other_id, lvl, 1.1);
+                link(node_id, other_id, lvl, 1.0);
             }
 
             if (!cand_set.empty()) {
@@ -2369,7 +2480,8 @@ void test_sequential_deletion_degradation();
 SimpleHNSW build_or_load_index(const std::string& index_file, 
                                const std::vector<std::vector<float>>& vectors,
                                const std::vector<std::string>& labels,
-                               int dim, int m, float level_prob, int ef_construction, int seed);
+                               int dim, int m, float level_prob, int ef_construction, int seed,
+                               bool force_rebuild = false);
 
 // Update/Testing Module  
 void run_update_tests(SimpleHNSW& hnsw_idx,
@@ -2386,39 +2498,47 @@ void run_update_tests(SimpleHNSW& hnsw_idx,
 SimpleHNSW build_or_load_index(const std::string& index_file, 
                                const std::vector<std::vector<float>>& vectors,
                                const std::vector<std::string>& labels,
-                               int dim, int m, float level_prob, int ef_construction, int seed) {
+                               int dim, int m, float level_prob, int ef_construction, int seed,
+                               bool force_rebuild) {
     
     SimpleHNSW hnsw_idx(dim, m, level_prob, ef_construction, seed);
     
-    // Try to load existing index, or build if not exists
-    if (std::filesystem::exists(index_file)) {
-        std::cout << "Loading existing index from disk...\n";
-        if (!hnsw_idx.load_from_disk(index_file)) {
-            std::cout << "Failed to load index, building new one...\n";
-            
-            std::cout << "\n[Building " << vectors.size() << " vectors into index...]\n";
-            for (int i = 0; i < (int)vectors.size(); ++i) {
-                hnsw_idx.insert(labels[i], vectors[i]);
-                if (i % 10000 == 0) {
-                    std::cout << "Inserted vector " << i << " into index\n";
-                }
+    // Check if index exists and rebuild is not forced
+    if (!force_rebuild && std::filesystem::exists(index_file)) {
+        std::cout << "Loading existing index from: " << index_file << "\n";
+        try {
+            if (hnsw_idx.load_from_disk(index_file)) {
+                std::cout << "Index loaded successfully!\n";
+                return hnsw_idx;
             }
-            
-            // Save after building
-            hnsw_idx.save_to_disk(index_file);
+        } catch (const std::exception& e) {
+            std::cout << "Failed to load index: " << e.what() << "\n"
+                      << "Falling back to rebuild...\n";
         }
-    } else {
-        std::cout << "Building new index...\n";
-        std::cout << "\n[Building " << vectors.size() << " vectors into index...]\n";
-        for (int i = 0; i < vectors.size(); ++i) {
-            hnsw_idx.insert(labels[i], vectors[i]);
-            if (i % 10000 == 0) {
-                std::cout << "Inserted vector " << i << " into index\n";
-            }
+    }
+
+    // Build new index
+    std::cout << "Building new index...\n";
+    auto start = std::chrono::steady_clock::now();
+    
+    std::cout << "\n[Building " << vectors.size() << " vectors into index...]\n";
+    for (int i = 0; i < (int)vectors.size(); ++i) {
+        hnsw_idx.insert(labels[i], vectors[i]);
+        if (i % 10000 == 0) {
+            std::cout << "Inserted vector " << i << " into index\n";
         }
-        
-        // Save after building
+    }
+    
+    auto end = std::chrono::steady_clock::now();
+    double build_time = std::chrono::duration<double, std::milli>(end - start).count();
+    std::cout << "Index built in " << build_time / 1000 << " seconds\n";
+    
+    // Save index
+    try {
         hnsw_idx.save_to_disk(index_file);
+        std::cout << "Index saved to: " << index_file << "\n";
+    } catch (const std::exception& e) {
+        std::cout << "Warning: Failed to save index: " << e.what() << "\n";
     }
     
     // Debug connectivity after building
@@ -2571,239 +2691,74 @@ std::vector<std::vector<int>> load_ivecs(const std::string &filename) {
 
 
 
-int main() {
-    std::cout << "HNSW demo starting...\n" << std::flush;
+int main(int argc, char* argv[]) {
+    auto config = parse_args(argc, argv);
+    
     // Start total execution timer
     auto program_start = std::chrono::steady_clock::now();
     
-    // const int N = 50000;
-    // const int D = 128;
-    // const int K = 5;
-    // const int EF = 20;
+    std::cout << "HNSW Demo with Local Rewiring\n"
+              << "==============================\n"
+              << "Dataset: " << config.dataset_path << "\n"
+              << "Index: " << config.index_file << "\n"
+              << "Dimension: " << config.dimension << "\n"
+              << "M: " << config.m << "\n"
+              << "Level Probability: " << config.level_probability << "\n"
+              << "EF Construction: " << config.ef_construction << "\n"
+              << "EF Search: " << config.ef_search << "\n"
+              << "Top-K: " << config.k << "\n"
+              << "Seed: " << config.seed << "\n\n";
 
-    // std::cout << "======================================================\n";
-    // std::cout << "HNSW Deletion Comparison: Tombstone vs Local Rewiring\n";
-    // std::cout << "======================================================\n";
-    // std::cout << "\nConfiguration:\n";
-    // std::cout << "  N: " << N << "\n";
-    // std::cout << "  D: " << D << "\n";
-    // std::cout << "  K: " << K << "\n";
-    // std::cout << "  EF: " << EF << "\n";
+    try {
+        // Load dataset
+        std::string base_file = config.dataset_path + "/amazon_base.fvecs";
+        std::string query_file = config.dataset_path + "/amazon_query.fvecs";
+        std::string gt_file = config.dataset_path + "/amazon_groundtruth.ivecs";
 
-    // std::mt19937 rng(42);
-    // std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        auto base_vectors = load_fvecs(base_file);
+        auto query_vectors = load_fvecs(query_file);
+        auto gt_neighbors = load_ivecs(gt_file);
 
-    // std::vector<std::string> labels;
-    // std::vector<std::vector<float>> vectors;
-    // labels.reserve(N);
-    // vectors.reserve(N);
+        if (base_vectors.empty() || query_vectors.empty() || gt_neighbors.empty()) {
+            throw std::runtime_error("Dataset files could not be loaded correctly.");
+        }
 
-    // for (int i = 0; i < N; ++i) {
-    //     std::string label = "vec_" + std::to_string(i);
-    //     std::vector<float> vec(D);
-    //     for (int d = 0; d < D; ++d) {
-    //         vec[d] = dist(rng);
-    //     }
-    //     labels.push_back(label);
-    //     vectors.push_back(std::move(vec));
-    // }
+        int N = base_vectors.size();
+        int Q = query_vectors.size();
+        int D = config.dimension;
 
-    // std::vector<float> query(D);
-    // for (int d = 0; d < D; ++d) {
-    //     query[d] = dist(rng);
-    // }
+        std::cout << "Loaded dataset:\n"
+                  << "  Base vectors: " << N << "\n"
+                  << "  Query vectors: " << Q << "\n"
+                  << "  Dimension: " << D << "\n\n";
 
-    // SimpleHNSW hnsw_tombstone(D, 16, 0.5f, 16, 42);
-    // SimpleHNSW hnsw_rewiring(D, 16, 0.5f, 16, 42);
+        // Create labels
+        std::vector<std::string> labels;
+        labels.reserve(N);
+        for (int i = 0; i < N; ++i) {
+            labels.push_back("vec_" + std::to_string(i));
+        }
 
-    // std::cout << "\n[Inserting " << N << " vectors into both indexes...]\n";
-    // for (int i = 0; i < N; ++i) {
-    //     hnsw_tombstone.insert(labels[i], vectors[i]);
-    //     hnsw_rewiring.insert(labels[i], vectors[i]);
-    // }
+        // Build or load index
+        SimpleHNSW hnsw_idx = build_or_load_index(
+            config.index_file, base_vectors, labels, D, 
+            config.m, config.level_probability, config.ef_construction, 
+            config.seed, config.rebuild_index);
 
-    // std::cout << "\n[Baseline search before deletion]\n";
-    // auto baseline_results =
-    //     hnsw_tombstone.search(query, K, EF, /*track_path=*/false);
+        // Run tests
+        std::vector<int> indices(N);
+        std::iota(indices.begin(), indices.end(), 0);
+        std::mt19937 rng(config.seed);
+        std::shuffle(indices.begin(), indices.end(), rng);
 
-    // std::uniform_int_distribution<int> dist_idx(1, N - 2);
-    // std::string node_to_delete = labels[dist_idx(rng)];
-    // std::cout << "\n[Deleting node: '" << node_to_delete << "']\n";
+        run_update_tests(hnsw_idx, base_vectors, labels, query_vectors, 
+                         gt_neighbors, config.milestones, indices, 
+                         N, config.k, config.ef_search, Q);
 
-    // auto start = std::chrono::steady_clock::now();
-    // hnsw_tombstone.delete_node(node_to_delete);
-    // auto end = std::chrono::steady_clock::now();
-    // double tombstone_delete_ms =
-    //     std::chrono::duration<double, std::milli>(end - start).count();
-
-    // start = std::chrono::steady_clock::now();
-    // auto tombstone_results =
-    //     hnsw_tombstone.search(query, K, EF, /*track_path=*/false);
-    // end = std::chrono::steady_clock::now();
-    // double tombstone_search_ms =
-    //     std::chrono::duration<double, std::milli>(end - start).count();
-
-    // start = std::chrono::steady_clock::now();
-    // auto stats = hnsw_rewiring.delete_with_local_rewiring(node_to_delete);
-    // end = std::chrono::steady_clock::now();
-    // double rewiring_delete_ms =
-    //     std::chrono::duration<double, std::milli>(end - start).count();
-
-    // start = std::chrono::steady_clock::now();
-    // auto rewiring_results =
-    //     hnsw_rewiring.search(query, K, EF, /*track_path=*/false);
-    // end = std::chrono::steady_clock::now();
-    // double rewiring_search_ms =
-    //     std::chrono::duration<double, std::milli>(end - start).count();
-
-    // auto print_results = [&](const std::string &title,
-    //                          const std::vector<SimpleHNSW::SearchResult> &results) {
-    //     std::cout << "\n" << title << "\n";
-    //     int rank = 1;
-    //     for (const auto &res : results) {
-    //         std::cout << "  " << rank++ << ". " << res.label
-    //                   << " distance=" << res.distance << "\n";
-    //     }
-    // };
-
-    // print_results("Baseline (before deletion)", baseline_results);
-    // print_results("Tombstone Deletion", tombstone_results);
-    // print_results("Local Rewiring Deletion", rewiring_results);
-
-    // auto extract_labels = [](const std::vector<SimpleHNSW::SearchResult> &results) {
-    //     std::vector<std::string> labels;
-    //     labels.reserve(results.size());
-    //     for (const auto &res : results) {
-    //         labels.push_back(res.label);
-    //     }
-    //     return labels;
-    // };
-
-    // auto labels_equal = [](const std::vector<std::string> &a,
-    //                        const std::vector<std::string> &b) {
-    //     if (a.size() != b.size()) {
-    //         return false;
-    //     }
-    //     for (size_t i = 0; i < a.size(); ++i) {
-    //         if (a[i] != b[i]) {
-    //             return false;
-    //         }
-    //     }
-    //     return true;
-    // };
-
-    // auto distances_match_fn = [](const std::vector<SimpleHNSW::SearchResult> &a,
-    //                              const std::vector<SimpleHNSW::SearchResult> &b,
-    //                              float eps = 1e-6f) {
-    //     if (a.size() != b.size()) {
-    //         return false;
-    //     }
-    //     for (size_t i = 0; i < a.size(); ++i) {
-    //         if (std::fabs(a[i].distance - b[i].distance) >= eps) {
-    //             return false;
-    //         }
-    //     }
-    //     return true;
-    // };
-
-    // auto tombstone_labels = extract_labels(tombstone_results);
-    // auto rewiring_labels = extract_labels(rewiring_results);
-    // bool labels_match = labels_equal(tombstone_labels, rewiring_labels);
-    // bool distances_match = distances_match_fn(tombstone_results, rewiring_results);
-
-    // std::cout << "\n" << std::string(70, '-')
-    //           << "\nRESULT COMPARISON:\n"
-    //           << std::string(70, '-') << "\n";
-    // if (labels_match && distances_match) {
-    //     std::cout << "✓ SUCCESS: Both deletion methods return IDENTICAL results!\n";
-    //     std::cout << "  - Labels match: true\n";
-    //     std::cout << "  - Distances match: true\n";
-    // } else {
-    //     std::cout << "✗ DIFFERENCE: Results differ between deletion methods\n";
-    //     if (!labels_match) {
-    //         std::cout << "  - Labels differ:\n";
-    //         std::cout << "    Tombstone: ";
-    //         for (const auto &lab : tombstone_labels) {
-    //             std::cout << lab << " ";
-    //         }
-    //         std::cout << "\n    Rewiring:  ";
-    //         for (const auto &lab : rewiring_labels) {
-    //             std::cout << lab << " ";
-    //         }
-    //         std::cout << "\n";
-    //     }
-    //     if (!distances_match) {
-    //         std::cout << "  - Distances differ:\n";
-    //         size_t limit = std::min(tombstone_results.size(), rewiring_results.size());
-    //         for (size_t i = 0; i < limit; ++i) {
-    //             if (std::fabs(tombstone_results[i].distance -
-    //                           rewiring_results[i].distance) >= 1e-6f) {
-    //                 std::cout << "    Rank " << (i + 1)
-    //                           << ": Tombstone=" << tombstone_results[i].distance
-    //                           << ", Rewiring=" << rewiring_results[i].distance
-    //                           << "\n";
-    //             }
-    //         }
-    //     }
-    // }
-
-    // auto contains_label = [](const std::vector<SimpleHNSW::SearchResult> &results,
-    //                          const std::string &label) {
-    //     for (const auto &res : results) {
-    //         if (res.label == label) {
-    //             return true;
-    //         }
-    //     }
-    //     return false;
-    // };
-
-    // bool deleted_in_tombstone = contains_label(tombstone_results, node_to_delete);
-    // bool deleted_in_rewiring = contains_label(rewiring_results, node_to_delete);
-
-    // std::cout << "\n[Verification]\n";
-    // std::cout << "  Deleted node '" << node_to_delete
-    //           << "' in tombstone results: " << std::boolalpha
-    //           << deleted_in_tombstone << "\n";
-    // std::cout << "  Deleted node '" << node_to_delete
-    //           << "' in rewiring results: " << std::boolalpha
-    //           << deleted_in_rewiring << "\n";
-    // if (!deleted_in_tombstone && !deleted_in_rewiring) {
-    //     std::cout << "  ✓ Deleted node correctly excluded from both methods\n";
-    // } else {
-    //     std::cout << "  ✗ WARNING: Deleted node still appears in results!\n";
-    // }
-
-    // std::cout << "\n[Performance Comparison]\n";
-    // auto compare_times = [](const std::string &label, double a, double b) {
-    //     std::cout << label << "\n";
-    //     std::cout << "  Tombstone: " << a << " ms\n";
-    //     std::cout << "  Rewiring:  " << b << " ms\n";
-    //     if (a < b) {
-    //         std::cout << "  → Tombstone is " << (b / a) << "x faster\n";
-    //     } else if (b < a) {
-    //         std::cout << "  → Rewiring is " << (a / b) << "x faster\n";
-    //     } else {
-    //         std::cout << "  → Both methods take the same time\n";
-    //     }
-    // };
-
-    // compare_times("\nDeletion Time:", tombstone_delete_ms, rewiring_delete_ms);
-    // compare_times("\nSearch Time:", tombstone_search_ms, rewiring_search_ms);
-
-    // double tombstone_total = tombstone_delete_ms + tombstone_search_ms;
-    // double rewiring_total = rewiring_delete_ms + rewiring_search_ms;
-    // compare_times("\nTotal Time:", tombstone_total, rewiring_total);
-
-    // std::cout << "\nRewired edges: " << stats.rewired_edges_count << "\n";
-    // std::cout << "Representative node: " << stats.representative_node << "\n";
-
-    // std::cout << "\nAnalysis complete.\n";
-    
-    // // Run top-layer deletion test
-    // test_top_layer_deletion();
-    
-    // Run sequential deletion degradation test
-    test_sequential_deletion_degradation();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
     
     // Calculate and display total execution time
     auto program_end = std::chrono::steady_clock::now();
@@ -3859,9 +3814,9 @@ void test_sequential_deletion_degradation() {
               << "\n" << std::string(70, '=') << "\n";
     
     // ------------------ LOAD SIFT DATASET ------------------
-    auto base_vectors   = load_fvecs("./gist/gist_base.fvecs");
-    auto query_vectors  = load_fvecs("./gist/gist_query.fvecs");
-    auto gt_neighbors   = load_ivecs("./gist/gist_groundtruth.ivecs");
+    auto base_vectors   = load_fvecs("./amazon/amazon_base.fvecs");
+    auto query_vectors  = load_fvecs("./amazon/amazon_query.fvecs");
+    auto gt_neighbors   = load_ivecs("./amazon/amazon_groundtruth.ivecs");
 
     if (base_vectors.empty() || query_vectors.empty() || gt_neighbors.empty()) {
         throw std::runtime_error("SIFT 1M dataset files could not be loaded correctly.");
@@ -3876,7 +3831,7 @@ void test_sequential_deletion_degradation() {
 
     // ANN parameters
     const int K  = 10;   // top-K neighbors to retrieve + eval recall@K
-    const int EF = 400;   // efSearch
+    const int EF = 200;   // efSearch
 
     // Number of queries to average over
     const int Q = query_vectors.size();
@@ -3924,8 +3879,8 @@ void test_sequential_deletion_degradation() {
     // ==================== MODULAR APPROACH ====================
     
     // 1. Build or load index using Index Builder Module
-    const std::string index_file = "hnsw_index_gist_100k.bin";
-    SimpleHNSW hnsw_idx = build_or_load_index(index_file, vectors, labels, D, 16, 0.25f, 400, 42);
+    const std::string index_file = "hnsw_index_amazon_Mar31.bin";
+    SimpleHNSW hnsw_idx = build_or_load_index(index_file, vectors, labels, D, 16, 0.25f, 200, 42);
     
     // 2. Run update tests using Update/Testing Module
     // run_update_tests(hnsw_idx, vectors, labels, query_vectors, gt_neighbors, 

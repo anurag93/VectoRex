@@ -4,3 +4,17 @@ demo.txt
 deep1M/
 gist/
 sift/
+amazon/
+amazon_review_consolidate.py
+deep1M_lr.txt
+generate_vectors_amazon.py
+hnsw_index_amazon_Mar31.bin 
+hnsw_index_amazon_review_100k.bin 
+hnsw_index_deep1M-100k.bin 
+hnsw_index_gist_100k.bin 
+hnsw_index_sift1M_Mar30.bin 
+hnsw_index_sift1M_Mar31.bin 
+hnsw_index_sift1M.bin 
+hnsw_index.bin 
+sift1M_tomb.txt
+annbench/*
