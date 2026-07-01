@@ -68,6 +68,9 @@ HNSW Demo with Local Rewiring Support
 
 Options:
   -d, --dataset PATH       Dataset directory path (default: ./amazon)
+  --base-file FILE         Base vectors file name (default: amazon_base.fvecs)
+  --query-file FILE        Query vectors file name (default: amazon_query.fvecs)
+  --groundtruth-file FILE  Ground truth file name (default: amazon_groundtruth.ivecs)
   -i, --index FILE         Index file path (default: hnsw_index.bin)
   --dimension DIM          Vector dimension (default: 384)
   -m, --max-connections M  Max connections per node (default: 16)
@@ -84,8 +87,17 @@ Options:
 ### Examples
 
 ```bash
-# Use custom dataset
-./cpp_hnsw_demo --dataset ./sift --dimension 128 --ef-construction 400
+# Default (Amazon dataset)
+./cpp_hnsw_demo
+
+# SIFT dataset
+./cpp_hnsw_demo --dataset ./sift --base-file sift_base.fvecs --query-file sift_query.fvecs --groundtruth-file sift_groundtruth.ivecs --dimension 128
+
+# GIST dataset
+./cpp_hnsw_demo --dataset ./gist --base-file gist_base.fvecs --query-file gist_query.fvecs --groundtruth-file gist_groundtruth.ivecs --dimension 960
+
+# Custom dataset with specific files
+./cpp_hnsw_demo --dataset ./my_data --base-file my_vectors.fvecs --query-file my_queries.fvecs --groundtruth-file my_gt.ivecs --dimension 256
 
 # Custom HNSW parameters
 ./cpp_hnsw_demo -m 32 --level-probability 0.3 --ef-search 200 -k 20

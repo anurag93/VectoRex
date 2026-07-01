@@ -34,6 +34,9 @@ enum class RUVariant {
 
 struct Config {
     std::string dataset_path = "./amazon";
+    std::string base_file = "amazon_base.fvecs";
+    std::string query_file = "amazon_query.fvecs";
+    std::string groundtruth_file = "amazon_groundtruth.ivecs";
     std::string index_file = "hnsw_index.bin";
     int dimension = 384;
     int m = 16;
@@ -51,6 +54,9 @@ void print_usage(const char* program_name) {
               << "HNSW Demo with Local Rewiring Support\n\n"
               << "Options:\n"
               << "  -d, --dataset PATH       Dataset directory path (default: ./amazon)\n"
+              << "  --base-file FILE         Base vectors file name (default: amazon_base.fvecs)\n"
+              << "  --query-file FILE        Query vectors file name (default: amazon_query.fvecs)\n"
+              << "  --groundtruth-file FILE  Ground truth file name (default: amazon_groundtruth.ivecs)\n"
               << "  -i, --index FILE         Index file path (default: hnsw_index.bin)\n"
               << "  --dimension DIM          Vector dimension (default: 384)\n"
               << "  -m, --max-connections M  Max connections per node (default: 16)\n"
@@ -68,6 +74,9 @@ Config parse_args(int argc, char* argv[]) {
     Config config;
     static struct option long_options[] = {
         {"dataset", required_argument, 0, 'd'},
+        {"base-file", required_argument, 0, 1008},
+        {"query-file", required_argument, 0, 1009},
+        {"groundtruth-file", required_argument, 0, 1010},
         {"index", required_argument, 0, 'i'},
         {"dimension", required_argument, 0, 1001},
         {"max-connections", required_argument, 0, 'm'},
@@ -89,6 +98,15 @@ Config parse_args(int argc, char* argv[]) {
         switch (c) {
             case 'd':
                 config.dataset_path = optarg;
+                break;
+            case 1008:
+                config.base_file = optarg;
+                break;
+            case 1009:
+                config.query_file = optarg;
+                break;
+            case 1010:
+                config.groundtruth_file = optarg;
                 break;
             case 'i':
                 config.index_file = optarg;
@@ -2711,9 +2729,9 @@ int main(int argc, char* argv[]) {
 
     try {
         // Load dataset
-        std::string base_file = config.dataset_path + "/amazon_base.fvecs";
-        std::string query_file = config.dataset_path + "/amazon_query.fvecs";
-        std::string gt_file = config.dataset_path + "/amazon_groundtruth.ivecs";
+        std::string base_file = config.dataset_path + "/" + config.base_file;
+        std::string query_file = config.dataset_path + "/" + config.query_file;
+        std::string gt_file = config.dataset_path + "/" + config.groundtruth_file;
 
         auto base_vectors = load_fvecs(base_file);
         auto query_vectors = load_fvecs(query_file);
