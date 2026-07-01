@@ -41,10 +41,10 @@ make -j$(nproc)
 
 ```bash
 # Simple compilation
-g++ -std=c++17 -O3 -DNDEBUG -o cpp_hnsw_demo cpp_hnsw_demo.cpp -lstdc++fs
+g++ -std=c++17 -O3 -DNDEBUG -o cpp_hnsw_demo cpp_hnsw_demo.cpp
 
 # For debugging
-g++ -std=c++17 -g -o cpp_hnsw_demo cpp_hnsw_demo.cpp -lstdc++fs
+g++ -std=c++17 -g -o cpp_hnsw_demo cpp_hnsw_demo.cpp
 ```
 
 ## Usage
